@@ -137,6 +137,7 @@ export type {
   ReactionHandler,
   SentMessage,
   StateAdapter,
+  StreamOptions,
   SubscribedMessageHandler,
   Thread,
   ThreadInfo,

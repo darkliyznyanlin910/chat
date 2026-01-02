@@ -15,6 +15,7 @@ import type {
   PostableMessage,
   SentMessage,
   StateAdapter,
+  StreamOptions,
   Thread,
 } from "./types";
 
@@ -139,6 +140,47 @@ export class ThreadImpl implements Thread {
 
   async startTyping(): Promise<void> {
     await this.adapter.startTyping(this.id);
+  }
+
+  /**
+   * Stream a message from an async iterable (like AI SDK's textStream).
+   */
+  async stream(
+    textStream: AsyncIterable<string>,
+    options?: StreamOptions,
+  ): Promise<SentMessage> {
+    if (this.adapter.stream) {
+      const raw = await this.adapter.stream(this.id, textStream, options);
+      return this.createSentMessage(raw.id, raw.raw as string ?? "");
+    }
+    return this.fallbackStream(textStream, options);
+  }
+
+  /**
+   * Fallback streaming implementation using post + edit.
+   * Used when adapter doesn't support native streaming.
+   */
+  private async fallbackStream(
+    textStream: AsyncIterable<string>,
+    options?: StreamOptions,
+  ): Promise<SentMessage> {
+    const intervalMs = options?.updateIntervalMs ?? 300;
+    const msg = await this.adapter.postMessage(this.id, "...");
+
+    let accumulated = "";
+    let lastUpdate = 0;
+
+    for await (const chunk of textStream) {
+      accumulated += chunk;
+      const now = Date.now();
+
+      if (now - lastUpdate >= intervalMs) {
+        await this.adapter.editMessage(this.id, msg.id, accumulated);
+        lastUpdate = now;
+      }
+    }
+    await this.adapter.editMessage(this.id, msg.id, accumulated);
+    return this.createSentMessage(msg.id, accumulated);
   }
 
   async refresh(): Promise<void> {

@@ -14,10 +14,12 @@ import type {
   PostableMessage,
   RawMessage,
   ReactionEvent,
+  StreamOptions,
   ThreadInfo,
   WebhookOptions,
 } from "chat";
 import {
+  ChatError,
   convertEmojiPlaceholders,
   defaultEmojiResolver,
   isCardElement,
@@ -976,6 +978,48 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
 
   async startTyping(_threadId: string): Promise<void> {
     // Slack doesn't have a direct typing indicator API for bots
+  }
+
+  /**
+   * Stream a message using Slack's native streaming API.
+   *
+   * Consumes an async iterable of text chunks and streams them to Slack.
+   * Requires `recipientUserId` and `recipientTeamId` in options.
+   */
+  async stream(
+    threadId: string,
+    textStream: AsyncIterable<string>,
+    options?: StreamOptions,
+  ): Promise<RawMessage<unknown>> {
+    if (!options?.recipientUserId || !options?.recipientTeamId) {
+      throw new ChatError(
+        "Slack streaming requires recipientUserId and recipientTeamId in options",
+        "MISSING_STREAM_OPTIONS",
+      );
+    }
+    const { channel, threadTs } = this.decodeThreadId(threadId);
+    this.logger?.debug("Slack: starting stream", { channel, threadTs });
+
+    const streamer = this.client.chatStream({
+      channel,
+      thread_ts: threadTs,
+      recipient_user_id: options.recipientUserId,
+      recipient_team_id: options.recipientTeamId,
+    });
+
+    for await (const chunk of textStream) {
+      await streamer.append({ markdown_text: chunk });
+    }
+    const result = await streamer.stop();
+    const messageTs = (result.message?.ts ?? result.ts) as string;
+
+    this.logger?.debug("Slack: stream complete", { messageId: messageTs });
+
+    return {
+      id: messageTs,
+      threadId,
+      raw: result,
+    };
   }
 
   /**

@@ -218,6 +218,36 @@ export interface Adapter<TThreadId = unknown, TRawMessage = unknown> {
    * @returns True if the thread is a DM, false otherwise
    */
   isDM?(threadId: string): boolean;
+
+  /**
+   * Stream a message using platform-native streaming APIs.
+   *
+   * The adapter consumes the async iterable and handles the entire streaming lifecycle.
+   * Only available on platforms with native streaming support (e.g., Slack).
+   *
+   * @param threadId - The thread to stream to
+   * @param textStream - Async iterable of text chunks (e.g., from AI SDK)
+   * @param options - Platform-specific streaming options
+   * @returns The raw message after streaming completes
+   */
+  stream?(
+    threadId: string,
+    textStream: AsyncIterable<string>,
+    options?: StreamOptions,
+  ): Promise<RawMessage<TRawMessage>>;
+}
+
+/**
+ * Options for streaming messages.
+ * Platform-specific options are passed through to the adapter.
+ */
+export interface StreamOptions {
+  /** Slack: The user ID to stream to (for AI assistant context) */
+  recipientUserId?: string;
+  /** Slack: The team/workspace ID */
+  recipientTeamId?: string;
+  /** Minimum interval between updates in ms (default: 300). Used for fallback mode. */
+  updateIntervalMs?: number;
 }
 
 /** Internal interface for Chat instance passed to adapters */
@@ -413,6 +443,32 @@ export interface Thread<TRawMessage = unknown> {
    * Some platforms support persistent typing indicators, others just send once.
    */
   startTyping(): Promise<void>;
+
+  /**
+   * Stream a message from an async iterable (like AI SDK's textStream).
+   *
+   * Uses platform-native streaming APIs when available (Slack).
+   * Falls back to post + edit with throttling for other platforms (Teams, GChat).
+   *
+   * **Slack:** Requires `recipientUserId` and `recipientTeamId` in options.
+   *
+   * @example
+   * ```typescript
+   * const message = await thread.stream(aiResponse.textStream, {
+   *   recipientUserId: message.author.userId,
+   *   recipientTeamId: message.raw.team,
+   *   updateIntervalMs: 300, // Fallback throttle interval
+   * });
+   * ```
+   *
+   * @param textStream - Async iterable of text chunks
+   * @param options - Streaming options
+   * @returns The final SentMessage after streaming completes
+   */
+  stream(
+    textStream: AsyncIterable<string>,
+    options?: StreamOptions,
+  ): Promise<SentMessage<TRawMessage>>;
 
   /**
    * Refresh `recentMessages` from the API.

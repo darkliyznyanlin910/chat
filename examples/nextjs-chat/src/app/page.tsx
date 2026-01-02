@@ -2,7 +2,7 @@ export default function Home() {
   return (
     <main style={{ padding: "2rem", fontFamily: "system-ui, sans-serif" }}>
       <h1>Chat SDK Example</h1>
-      <p>This is an example Next.js app using chat-sdk.</p>
+      <p>This is an example Next.js app using chat.</p>
 
       <h2>Webhook Endpoints</h2>
       <ul>
