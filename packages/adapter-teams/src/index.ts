@@ -1013,7 +1013,7 @@ export class TeamsAdapter implements Adapter<TeamsThreadId, unknown> {
       // Check if it's a permission error
       if (error instanceof Error && error.message?.includes("403")) {
         throw new NotImplementedError(
-          "Teams fetchMessages requires ChatMessage.Read.Chat (or Chat.Read.All) application permission in Azure AD.",
+          "Teams fetchMessages requires one of these Azure AD app permissions: ChatMessage.Read.Chat, Chat.Read.All, or Chat.Read.WhereInstalled",
           "fetchMessages",
         );
       }

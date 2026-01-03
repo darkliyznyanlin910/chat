@@ -176,10 +176,13 @@ bot.onSubscribedMessage(async (thread, message) => {
       // Some adapters (Teams) don't support fetching message history
       messages = thread.recentMessages;
     }
-    const history = messages.reverse().map((msg) => ({
-      role: msg.author.isMe ? ("assistant" as const) : ("user" as const),
-      content: msg.text,
-    }));
+    const history = messages
+      .reverse()
+      .filter((msg) => msg.text.trim()) // Filter out empty messages (cards, system msgs)
+      .map((msg) => ({
+        role: msg.author.isMe ? ("assistant" as const) : ("user" as const),
+        content: msg.text,
+      }));
     const result = await agent.stream({ prompt: history });
     await thread.post(result.textStream);
     return;

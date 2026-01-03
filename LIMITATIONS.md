@@ -38,7 +38,7 @@ This document outlines the capabilities and limitations of each chat platform ad
 - **Typing indicators**: Supported via `ActivityTypes.Typing`
 - **Message history (fetchMessages)**: Supported via Microsoft Graph API. Requires:
   - `appTenantId` in adapter config
-  - Azure AD app permission: `ChatMessage.Read.Chat` (least privileged) or `Chat.Read.All`
+  - Azure AD app permission (one of): `ChatMessage.Read.Chat`, `Chat.Read.All`, `Chat.Read.WhereInstalled`
 
 **Notes:**
 - Bot identification uses `appId` matching against `activity.from.id`
