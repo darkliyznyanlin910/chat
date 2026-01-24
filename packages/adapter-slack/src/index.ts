@@ -1513,6 +1513,34 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
     }
   }
 
+  /**
+   * Fetch a single message by ID (timestamp).
+   */
+  async fetchMessage(
+    threadId: string,
+    messageId: string,
+  ): Promise<Message<unknown> | null> {
+    const { channel, threadTs } = this.decodeThreadId(threadId);
+
+    try {
+      const result = await this.client.conversations.replies({
+        channel,
+        ts: threadTs,
+        oldest: messageId,
+        inclusive: true,
+        limit: 1,
+      });
+
+      const messages = (result.messages || []) as SlackEvent[];
+      const target = messages.find((msg) => msg.ts === messageId);
+      if (!target) return null;
+
+      return this.parseSlackMessage(target, threadId);
+    } catch (error) {
+      this.handleSlackError(error);
+    }
+  }
+
   encodeThreadId(platformData: SlackThreadId): string {
     return `slack:${platformData.channel}:${platformData.threadTs}`;
   }
