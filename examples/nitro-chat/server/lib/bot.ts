@@ -339,6 +339,7 @@ bot.onNewMessage(/help/i, async (thread, message) => {
 });
 
 bot.onSubscribedMessage(async (thread, message) => {
+  if (!message.isMention) return;
   const threadState = await thread.state;
 
   if (/disable\s*AI/i.test(message.text)) {

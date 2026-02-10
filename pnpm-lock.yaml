@@ -93,6 +93,12 @@ importers:
       '@chat-adapter/gchat':
         specifier: workspace:*
         version: link:../../packages/adapter-gchat
+      '@chat-adapter/github':
+        specifier: workspace:^
+        version: link:../../packages/adapter-github
+      '@chat-adapter/linear':
+        specifier: workspace:^
+        version: link:../../packages/adapter-linear
       '@chat-adapter/slack':
         specifier: workspace:*
         version: link:../../packages/adapter-slack
