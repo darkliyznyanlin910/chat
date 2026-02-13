@@ -74,7 +74,7 @@ const savoir = createSavoir({
 });
 
 const agent = new ToolLoopAgent({
-  model: "google/gemini-3-flash",
+  model: "anthropic/claude-3.5-haiku",
   instructions: basePrompt,
   tools: savoir.tools,
 });
@@ -374,21 +374,24 @@ bot.onNewMessage(/help/i, async (thread, message) => {
 });
 
 bot.onSubscribedMessage(async (thread, message) => {
-  if (!message.isMention) return;
   const threadState = await thread.state;
 
-  if (/disable\s*AI/i.test(message.text)) {
-    await thread.setState({ aiMode: false });
-    await thread.post(`${emoji.check} AI mode disabled for this thread.`);
-    return;
+  // Handle AI enable/disable commands (require mention)
+  if (message.isMention) {
+    if (/disable\s*AI/i.test(message.text)) {
+      await thread.setState({ aiMode: false });
+      await thread.post(`${emoji.check} AI mode disabled for this thread.`);
+      return;
+    }
+
+    if (/enable\s*AI/i.test(message.text)) {
+      await thread.setState({ aiMode: true });
+      await thread.post(`${emoji.sparkles} AI mode enabled for this thread!`);
+      return;
+    }
   }
 
-  if (/enable\s*AI/i.test(message.text)) {
-    await thread.setState({ aiMode: true });
-    await thread.post(`${emoji.sparkles} AI mode enabled for this thread!`);
-    return;
-  }
-
+  // AI mode: respond to all messages, not just mentions
   if (threadState?.aiMode) {
     let messages: typeof thread.recentMessages;
     try {
@@ -411,6 +414,9 @@ bot.onSubscribedMessage(async (thread, message) => {
     await thread.post(result.textStream);
     return;
   }
+
+  // Everything below requires a mention
+  if (!message.isMention) return;
 
   if (/^dm\s*me$/i.test(message.text.trim())) {
     try {
