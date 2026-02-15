@@ -19,6 +19,7 @@ import type {
   FieldsElement,
   ImageElement,
   LinkButtonElement,
+  RadioSelectElement,
   SectionElement,
   SelectElement,
   TextElement,
@@ -58,18 +59,25 @@ interface SlackLinkButtonElement {
   style?: "primary" | "danger";
 }
 
+interface SlackOptionObject {
+  text: SlackTextObject;
+  value: string;
+  description?: SlackTextObject;
+}
+
 interface SlackSelectElement {
   type: "static_select";
   action_id: string;
   placeholder?: SlackTextObject;
-  options: Array<{
-    text: SlackTextObject;
-    value: string;
-  }>;
-  initial_option?: {
-    text: SlackTextObject;
-    value: string;
-  };
+  options: SlackOptionObject[];
+  initial_option?: SlackOptionObject;
+}
+
+interface SlackRadioSelectElement {
+  type: "radio_buttons";
+  action_id: string;
+  options: SlackOptionObject[];
+  initial_option?: SlackOptionObject;
 }
 
 /**
@@ -182,7 +190,8 @@ function convertDividerToBlock(_element: DividerElement): SlackBlock {
 type SlackActionElement =
   | SlackButtonElement
   | SlackLinkButtonElement
-  | SlackSelectElement;
+  | SlackSelectElement
+  | SlackRadioSelectElement;
 
 function convertActionsToBlock(element: ActionsElement): SlackBlock {
   const elements: SlackActionElement[] = element.children.map((child) => {
@@ -191,6 +200,9 @@ function convertActionsToBlock(element: ActionsElement): SlackBlock {
     }
     if (child.type === "select") {
       return convertSelectToElement(child);
+    }
+    if (child.type === "radio_select") {
+      return convertRadioSelectToElement(child);
     }
     return convertButtonToElement(child);
   });
@@ -247,10 +259,19 @@ function convertLinkButtonToElement(
 }
 
 function convertSelectToElement(select: SelectElement): SlackSelectElement {
-  const options = select.options.map((opt) => ({
-    text: { type: "plain_text" as const, text: convertEmoji(opt.label) },
-    value: opt.value,
-  }));
+  const options: SlackOptionObject[] = select.options.map((opt) => {
+    const option: SlackOptionObject = {
+      text: { type: "plain_text" as const, text: convertEmoji(opt.label) },
+      value: opt.value,
+    };
+    if (opt.description) {
+      option.description = {
+        type: "plain_text",
+        text: convertEmoji(opt.description),
+      };
+    }
+    return option;
+  });
   const element: SlackSelectElement = {
     type: "static_select",
     action_id: select.id,
@@ -264,6 +285,40 @@ function convertSelectToElement(select: SelectElement): SlackSelectElement {
   }
   if (select.initialOption) {
     const initialOpt = options.find((o) => o.value === select.initialOption);
+    if (initialOpt) {
+      element.initial_option = initialOpt;
+    }
+  }
+  return element;
+}
+
+function convertRadioSelectToElement(
+  radioSelect: RadioSelectElement,
+): SlackRadioSelectElement {
+  const limitedOptions = radioSelect.options.slice(0, 10);
+  const options: SlackOptionObject[] = limitedOptions.map((opt) => {
+    const option: SlackOptionObject = {
+      text: { type: "mrkdwn" as const, text: convertEmoji(opt.label) },
+      value: opt.value,
+    };
+    if (opt.description) {
+      option.description = {
+        type: "mrkdwn",
+        text: convertEmoji(opt.description),
+      };
+    }
+    return option;
+  });
+
+  const element: SlackRadioSelectElement = {
+    type: "radio_buttons",
+    action_id: radioSelect.id,
+    options,
+  };
+  if (radioSelect.initialOption) {
+    const initialOpt = options.find(
+      (o) => o.value === radioSelect.initialOption,
+    );
     if (initialOpt) {
       element.initial_option = initialOpt;
     }

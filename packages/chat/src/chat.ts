@@ -763,30 +763,19 @@ export class Chat<
       return;
     }
 
-    const isEphemeralMessage = event.messageId?.startsWith("ephemeral:");
-    const [isSubscribed, fetchedMessage] = await Promise.all([
-      this._stateAdapter.isSubscribed(event.threadId),
-      event.messageId && event.adapter.fetchMessage && !isEphemeralMessage
-        ? event.adapter
-            .fetchMessage(event.threadId, event.messageId)
-            .catch(() => null)
-        : Promise.resolve(null),
-    ]);
-
-    const messageForThread = fetchedMessage
-      ? new Message(fetchedMessage)
-      : event.messageId
-        ? new Message({
-            id: event.messageId,
-            threadId: event.threadId,
-            text: "",
-            formatted: { type: "root", children: [] },
-            raw: event.raw,
-            author: event.user,
-            metadata: { dateSent: new Date(), edited: false },
-            attachments: [],
-          })
-        : ({} as Message);
+    const isSubscribed = false;
+    const messageForThread = event.messageId
+      ? new Message({
+          id: event.messageId,
+          threadId: event.threadId,
+          text: "",
+          formatted: { type: "root", children: [] },
+          raw: event.raw,
+          author: event.user,
+          metadata: { dateSent: new Date(), edited: false },
+          attachments: [],
+        })
+      : ({} as Message);
 
     // Create thread for the action event
     const thread = await this.createThread(
@@ -823,12 +812,26 @@ export class Chat<
         }
 
         // Store context server-side and pass contextId to adapter
-        // Only pass message if it's a proper Message object (has toJSON method)
-        const recentMessage = thread.recentMessages[0];
-        const message =
-          recentMessage && typeof recentMessage.toJSON === "function"
-            ? recentMessage
-            : undefined;
+        const isEphemeralMessage = event.messageId?.startsWith("ephemeral:");
+        let message: Message | undefined;
+        if (isEphemeralMessage) {
+          const recentMessage = thread.recentMessages[0];
+          if (recentMessage && typeof recentMessage.toJSON === "function") {
+            message = recentMessage as Message;
+          }
+        } else if (event.messageId && event.adapter.fetchMessage) {
+          const fetched = await event.adapter
+            .fetchMessage(event.threadId, event.messageId)
+            .catch(() => null);
+          if (fetched) {
+            message = new Message(fetched);
+          } else {
+            const recentMessage = thread.recentMessages[0];
+            if (recentMessage && typeof recentMessage.toJSON === "function") {
+              message = recentMessage as Message;
+            }
+          }
+        }
         const contextId = crypto.randomUUID();
         this.storeModalContext(
           event.adapter.name,

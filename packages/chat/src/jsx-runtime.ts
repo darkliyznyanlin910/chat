@@ -55,6 +55,8 @@ import {
   Modal,
   type ModalChild,
   type ModalElement,
+  RadioSelect,
+  type RadioSelectElement,
   Select,
   type SelectElement,
   SelectOption,
@@ -156,6 +158,7 @@ export interface SelectProps {
 export interface SelectOptionProps {
   label: string;
   value: string;
+  description?: string;
 }
 
 /** Union of all valid JSX props */
@@ -188,6 +191,7 @@ type CardComponentFunction =
   | typeof Modal
   | typeof TextInput
   | typeof Select
+  | typeof RadioSelect
   | typeof SelectOption;
 
 /**
@@ -222,7 +226,8 @@ type CardChildOrNested =
   | LinkButtonElement
   | FieldElement
   | SelectElement
-  | SelectOptionElement;
+  | SelectOptionElement
+  | RadioSelectElement;
 
 /**
  * Process children, converting JSX elements to card elements.
@@ -385,12 +390,13 @@ function resolveJSXElement(element: JSXElement): AnyCardElement {
   }
 
   if (type === Actions) {
-    // Actions takes array of ButtonElements, LinkButtonElements, and SelectElements
+    // Actions takes array of ButtonElements, LinkButtonElements, SelectElements, and RadioSelectElements
     return Actions(
       processedChildren as (
         | ButtonElement
         | LinkButtonElement
         | SelectElement
+        | RadioSelectElement
       )[],
     );
   }
@@ -504,6 +510,19 @@ function resolveJSXElement(element: JSXElement): AnyCardElement {
     });
   }
 
+  if (type === RadioSelect) {
+    if (!isSelectProps(props)) {
+      throw new Error("RadioSelect requires 'id' and 'label' props");
+    }
+    return RadioSelect({
+      id: props.id,
+      label: props.label,
+      initialOption: props.initialOption,
+      optional: props.optional,
+      options: processedChildren as SelectOptionElement[],
+    });
+  }
+
   if (type === SelectOption) {
     if (!isSelectOptionProps(props)) {
       throw new Error("SelectOption requires 'label' and 'value' props");
@@ -511,6 +530,7 @@ function resolveJSXElement(element: JSXElement): AnyCardElement {
     return SelectOption({
       label: props.label,
       value: props.value,
+      description: props.description,
     });
   }
 

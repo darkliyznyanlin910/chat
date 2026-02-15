@@ -6,4 +6,4 @@
 "chat": minor
 ---
 
-Adding inline Select components to cards
+Adding inline Select components and Radio buttons to cards

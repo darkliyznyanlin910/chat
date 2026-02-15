@@ -44,7 +44,7 @@
  * ```
  */
 
-import type { SelectElement } from "./modals";
+import type { RadioSelectElement, SelectElement } from "./modals";
 
 // ============================================================================
 // Card Element Types
@@ -106,8 +106,13 @@ export interface DividerElement {
 /** Container for action buttons and selects */
 export interface ActionsElement {
   type: "actions";
-  /** Button, link button, and select elements */
-  children: (ButtonElement | LinkButtonElement | SelectElement)[];
+  /** Button, link button, select, and radio select elements */
+  children: (
+    | ButtonElement
+    | LinkButtonElement
+    | SelectElement
+    | RadioSelectElement
+  )[];
 }
 
 /** Section container for grouping elements */
@@ -149,7 +154,8 @@ type AnyCardElement =
   | ButtonElement
   | LinkButtonElement
   | FieldElement
-  | SelectElement;
+  | SelectElement
+  | RadioSelectElement;
 
 /** Root card element */
 export interface CardElement {
@@ -295,11 +301,17 @@ export function Section(children: CardChild[]): SectionElement {
  *   Button({ id: "cancel", label: "Cancel" }),
  *   LinkButton({ url: "https://example.com", label: "Learn More" }),
  *   Select({ id: "priority", label: "Priority", options: [...] }),
+ *   RadioSelect({ id: "status", label: "Status", options: [...] }),
  * ])
  * ```
  */
 export function Actions(
-  children: (ButtonElement | LinkButtonElement | SelectElement)[],
+  children: (
+    | ButtonElement
+    | LinkButtonElement
+    | SelectElement
+    | RadioSelectElement
+  )[],
 ): ActionsElement {
   return {
     type: "actions",
@@ -506,7 +518,8 @@ export function fromReactElement(element: unknown): AnyCardElement | null {
     el.type !== "button" &&
     el.type !== "link-button" &&
     el.type !== "field" &&
-    el.type !== "select";
+    el.type !== "select" &&
+    el.type !== "radio_select";
 
   // Call the appropriate builder function based on component type
   switch (componentName) {
@@ -539,10 +552,17 @@ export function fromReactElement(element: unknown): AnyCardElement | null {
     case "Actions":
       return Actions(
         convertedChildren.filter(
-          (c): c is ButtonElement | LinkButtonElement | SelectElement =>
+          (
+            c,
+          ): c is
+            | ButtonElement
+            | LinkButtonElement
+            | SelectElement
+            | RadioSelectElement =>
             c.type === "button" ||
             c.type === "link-button" ||
-            c.type === "select",
+            c.type === "select" ||
+            c.type === "radio_select",
         ),
       );
 

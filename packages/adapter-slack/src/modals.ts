@@ -6,6 +6,7 @@
 import type {
   ModalChild,
   ModalElement,
+  RadioSelectElement,
   SelectElement,
   TextInputElement,
 } from "chat";
@@ -104,6 +105,8 @@ function modalChildToBlock(child: ModalChild): SlackBlock {
       return textInputToBlock(child);
     case "select":
       return selectToBlock(child);
+    case "radio_select":
+      return radioSelectToBlock(child);
     case "text":
       return convertTextToBlock(child);
     case "fields":
@@ -138,10 +141,16 @@ function textInputToBlock(input: TextInputElement): SlackBlock {
 }
 
 function selectToBlock(select: SelectElement): SlackBlock {
-  const options = select.options.map((opt) => ({
-    text: { type: "plain_text" as const, text: opt.label },
-    value: opt.value,
-  }));
+  const options = select.options.map((opt) => {
+    const option: Record<string, unknown> = {
+      text: { type: "plain_text" as const, text: opt.label },
+      value: opt.value,
+    };
+    if (opt.description) {
+      option.description = { type: "plain_text", text: opt.description };
+    }
+    return option;
+  });
 
   const element: Record<string, unknown> = {
     type: "static_select",
@@ -154,7 +163,9 @@ function selectToBlock(select: SelectElement): SlackBlock {
   }
 
   if (select.initialOption) {
-    const initialOpt = options.find((o) => o.value === select.initialOption);
+    const initialOpt = options.find(
+      (o) => (o as { value: string }).value === select.initialOption,
+    );
     if (initialOpt) {
       element.initial_option = initialOpt;
     }
@@ -165,6 +176,41 @@ function selectToBlock(select: SelectElement): SlackBlock {
     block_id: select.id,
     optional: select.optional ?? false,
     label: { type: "plain_text", text: select.label },
+    element,
+  };
+}
+
+function radioSelectToBlock(radioSelect: RadioSelectElement): SlackBlock {
+  const limitedOptions = radioSelect.options.slice(0, 10);
+  const options = limitedOptions.map((opt) => {
+    const option: Record<string, unknown> = {
+      text: { type: "mrkdwn" as const, text: opt.label },
+      value: opt.value,
+    };
+    if (opt.description) {
+      option.description = { type: "mrkdwn", text: opt.description };
+    }
+    return option;
+  });
+
+  const element: Record<string, unknown> = {
+    type: "radio_buttons",
+    action_id: radioSelect.id,
+    options,
+  };
+  if (radioSelect.initialOption) {
+    const initialOpt = options.find(
+      (o) => (o as { value: string }).value === radioSelect.initialOption,
+    );
+    if (initialOpt) {
+      element.initial_option = initialOpt;
+    }
+  }
+  return {
+    type: "input",
+    block_id: radioSelect.id,
+    optional: radioSelect.optional ?? false,
+    label: { type: "plain_text", text: radioSelect.label },
     element,
   };
 }

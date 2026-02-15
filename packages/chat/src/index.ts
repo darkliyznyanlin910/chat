@@ -58,6 +58,7 @@ import {
   fromReactModalElement as _fromReactModalElement,
   isModalElement as _isModalElement,
   Modal as _Modal,
+  RadioSelect as _RadioSelect,
   Select as _Select,
   SelectOption as _SelectOption,
   TextInput as _TextInput,
@@ -65,6 +66,7 @@ import {
 export const fromReactModalElement = _fromReactModalElement;
 export const isModalElement = _isModalElement;
 export const Modal = _Modal;
+export const RadioSelect = _RadioSelect;
 export const Select = _Select;
 export const SelectOption = _SelectOption;
 export const TextInput = _TextInput;
@@ -93,6 +95,8 @@ export type {
   ModalChild,
   ModalElement,
   ModalOptions,
+  RadioSelectElement,
+  RadioSelectOptions,
   SelectElement,
   SelectOptionElement,
   SelectOptions,
