@@ -85,21 +85,52 @@ No `callbackId`. No `onModalSubmit`. No `privateMetadata`. The workflow suspends
 
 Today `event.openModal()` returns `Promise<{ viewId: string } | undefined>` -- it fires and forgets. Under the workflow model, it returns `Promise<ModalResult>` -- a promise that **suspends the workflow** until the user submits or closes the modal.
 
-Under the hood, this maps directly to Workflow DevKit's `createWebhook()` pattern:
+Under the hood, this maps directly to Workflow DevKit's `createWebhook()` pattern. Per the WDK docs, `createWebhook()` returns a `Webhook` object where `await webhook` resolves to a standard `Request` (or `RequestWithResponse` for dynamic responses). The adapter POSTs the modal event data as JSON to `webhook.url`, and the workflow reads it via `request.json()`.
+
+The implementation is split into orchestration (workflow function) and actual work (step functions), following WDK best practices -- workflow functions orchestrate, step functions have full Node.js access:
 
 ```ts
+import { createWebhook, type RequestWithResponse } from "workflow";
+
+// Step function: opens the modal on the platform (needs Node.js / adapter access)
+async function platformOpenModal(
+  adapter: Adapter,
+  triggerId: string,
+  modalElement: ModalElement,
+  webhookUrl: string,
+): Promise<{ viewId: string }> {
+  "use step";
+  return adapter.openModal(triggerId, modalElement, undefined, { webhookUrl });
+}
+
+// Step function: parses the webhook request (respondWith must be in a step)
+async function parseModalWebhook(
+  request: RequestWithResponse,
+): Promise<ModalWebhookPayload> {
+  "use step";
+  const data = await request.json();
+
+  // For validation flows: send a synchronous response back to the platform
+  // (e.g., Slack expects `response_action: "errors"` in the HTTP response)
+  // This is handled later via respondWith() -- see Validation Loop section
+  return data;
+}
+
 // Conceptual implementation inside the Chat class
 async openModal(modal: ModalElement | CardJSXElement): Promise<ModalResult> {
-  "use step";
+  "use workflow";
 
-  const webhook = createWebhook<ModalWebhookPayload>();
+  // createWebhook() -- no type parameter; always resolves to Request
+  const webhook = createWebhook({ respondWith: "manual" });
 
-  // Open the modal on the platform, passing webhook.url as the callback
-  await adapter.openModal(triggerId, modalElement, { webhookUrl: webhook.url });
+  // Step: open the modal on the platform, passing webhook.url as the callback
+  await platformOpenModal(adapter, triggerId, modalElement, webhook.url);
 
   // Workflow suspends here -- no compute consumed while user fills the form
-  const payload = await webhook;
-  const data = await payload.json();
+  const request = await webhook;
+
+  // Step: parse the request body
+  const data = await parseModalWebhook(request);
 
   if (data.type === "submit") {
     return { action: "submit", values: data.values, user: data.user };
@@ -109,7 +140,14 @@ async openModal(modal: ModalElement | CardJSXElement): Promise<ModalResult> {
 }
 ```
 
-The workflow **suspends** at `await webhook`. When the platform sends the modal submission back to chat-sdk, instead of routing to `onModalSubmit` handlers, the system hits the webhook URL to resume the workflow with the submitted data.
+Key WDK patterns used here:
+
+- **`createWebhook()`** -- no generic type parameter (unlike `createHook<T>()`). Always resolves to `Request`.
+- **`respondWith: "manual"`** -- enables dynamic HTTP responses from step functions, critical for the validation loop (Slack needs `{ response_action: "errors" }` in the synchronous HTTP response).
+- **Step functions for all "real work"** -- `platformOpenModal` and `parseModalWebhook` are `"use step"` functions with full Node.js access. The workflow function only orchestrates.
+- **`respondWith()` called from step functions** -- per WDK docs, `request.respondWith()` must be called inside a `"use step"` function.
+
+The workflow **suspends** at `await webhook`. When the platform sends the modal submission back to chat-sdk, instead of routing to `onModalSubmit` handlers, the adapter POSTs to `webhook.url` to resume the workflow with the submitted data.
 
 ### Inline `onAction` on Button Components
 
@@ -205,7 +243,7 @@ bot.onAction("report", async (event) => {
 });
 ```
 
-Internally, when `errors` is set, the next `openModal` call returns a `response_action: "errors"` response to the platform before suspending again for the next submission.
+Internally, when `errors` is set, the next `openModal` call uses `request.respondWith()` (from a `"use step"` function, per WDK requirements) to send a `response_action: "errors"` response back to the platform synchronously, then creates a new webhook and suspends again for the next submission. This leverages `createWebhook({ respondWith: "manual" })` so that each submission can receive a dynamic response before the workflow re-suspends.
 
 ### Cancellation via Try/Catch
 
@@ -249,11 +287,11 @@ bot.onAction("approval", async (event) => {
 
   const result = await Promise.race([
     modalPromise,
-    sleep("1 hour").then(() => "timeout" as const),
+    sleep("1h").then(() => "timeout" as const),
   ]);
 
   if (result === "timeout") {
-    await event.thread.post("Approval request expired after 1 hour.");
+    await event.thread.post("Approval request expired after 1h.");
     return;
   }
 
@@ -390,11 +428,12 @@ async function collectVotes(thread: Thread, voters: string[]) {
 
 The core mechanism uses `createWebhook()` from Workflow DevKit. When `openModal()` is called inside a `"use workflow"` function:
 
-1. A webhook is created via `createWebhook<ModalWebhookPayload>()`
+1. A webhook is created via `createWebhook({ respondWith: "manual" })` -- `respondWith: "manual"` is needed so step functions can send dynamic HTTP responses (e.g., validation errors) back to the platform
 2. The webhook URL is passed to the adapter's `openModal()` method (new `webhookUrl` parameter)
 3. The adapter stores the webhook URL alongside the modal's platform-specific metadata
 4. When the platform sends a submission/close event, the adapter POSTs to the webhook URL instead of calling `processModalSubmit()`
-5. The workflow resumes with the payload
+5. The workflow resumes -- `await webhook` resolves to a standard `Request` object (per WDK docs, `createWebhook` always resolves to `Request`, unlike `createHook<T>` which resolves to `T`)
+6. A step function parses the request via `request.json()` and optionally calls `request.respondWith()` for validation errors
 
 #### 2. Adapter Changes
 
@@ -486,11 +525,36 @@ bot.onAction("feedback", async (event) => {
 });
 ```
 
+## Workflow DevKit Best Practices Alignment
+
+This section maps each proposed pattern to its corresponding WDK primitive and confirms alignment with the documented best practices.
+
+| RFC Pattern | WDK Primitive | Best Practice |
+|---|---|---|
+| `openModal()` suspends workflow | `createWebhook()` + `await webhook` | Correct: webhooks suspend the workflow with zero compute. `await webhook` resolves to `Request`. |
+| Validation error responses | `respondWith: "manual"` + `request.respondWith()` in a step | Correct: per WDK docs, `respondWith()` must be called from a `"use step"` function. Manual mode enables dynamic responses. |
+| `sleep("1h")` for timeouts | `sleep()` from `"workflow"` | Correct: `sleep` accepts duration strings like `"1h"`, `"1d"`, `"10s"`. |
+| `Promise.race([modal, sleep])` | Native JS in workflow context | Correct: workflow functions support `Promise.race`, `Promise.all`, and other JS primitives for orchestration. |
+| Multi-step wizards (sequential `await`) | Sequential `createWebhook()` calls | Correct: each `await` is a separate suspension point. The event log replays prior steps on resume. |
+| Parallel vote collection (`Promise.all`) | Multiple concurrent webhooks | Correct: WDK supports multiple concurrent hooks/webhooks in a single workflow. |
+| `ModalClosedError` via try/catch | Standard error handling in workflows | Correct: workflow functions support try/catch. Errors propagate normally. |
+| Step functions for adapter calls | `"use step"` for Node.js work | Correct: workflow functions are sandboxed (no Node.js). All adapter calls, HTTP requests, and `respondWith()` calls must happen in step functions. |
+| Serialization across suspension | `@workflow/serde` (already integrated) | Correct: chat-sdk already has `WORKFLOW_SERIALIZE`/`WORKFLOW_DESERIALIZE` on `ThreadImpl` and `Message`. `ModalResult` and `ActionEvent` will need the same treatment. |
+| Deterministic replay | Workflow event log | Correct: step results are persisted. On replay, steps return cached results without re-executing. `openModal` as a step means the modal isn't re-opened on replay. |
+
+**Key WDK constraints respected:**
+
+1. **`createWebhook()` has no generic type parameter** -- unlike `createHook<T>()`, webhooks always resolve to `Request`. Type safety for modal values is layered on top by the `openModal()` implementation.
+2. **`respondWith()` must be called from a step function** -- this is a current WDK limitation (may be relaxed in the future). The validation loop pattern accounts for this.
+3. **Pass-by-value semantics** -- step function parameters are serialized. The `openModal` step receives the serialized modal element and adapter reference, not live objects. The `chat.registerSingleton()` pattern already handles lazy adapter resolution after deserialization.
+4. **Determinism in workflow functions** -- no `Math.random`, `Date.now()`, or non-deterministic calls directly in workflow functions. All such logic lives in step functions.
+5. **`sleep()` is a special step** -- called directly in workflow functions, not inside step functions.
+
 ## Open Questions
 
 1. **Handler registry persistence** -- Should inline `onAction` handlers be persisted to the state adapter so they survive deployments? Or are they ephemeral (scoped to the process lifetime)?
 
-2. **Validation response mechanism** -- How does the workflow return `{ action: "errors", errors: { ... } }` to the platform synchronously? Slack expects this in the HTTP response to the `view_submission` webhook. The webhook-based approach may need a synchronous response path (e.g., the adapter waits briefly for the workflow to resume and produce a validation response).
+2. **Validation response latency** -- The proposed approach uses `createWebhook({ respondWith: "manual" })` and calls `request.respondWith()` from a step function to send validation errors synchronously. However, the workflow must resume, run the validation step, and call `respondWith()` all within the platform's response timeout (Slack allows ~3 seconds for `view_submission`). Is the WDK resume-to-step-execution latency low enough, or do we need an optimistic path where the adapter holds the HTTP response open while the workflow resumes?
 
 3. **Platform constraints** -- Slack's trigger IDs expire in 3 seconds. In a multi-step wizard, the second `openModal()` call needs a fresh trigger ID. This may require the submission webhook response to include a new trigger ID, or the adapter to use Slack's `response_action: "push"` to chain views.
 
