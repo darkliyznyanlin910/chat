@@ -310,19 +310,33 @@ export class DiscordAdapter implements Adapter<DiscordThreadId, unknown> {
       return;
     }
 
-    const channelId = interaction.channel_id;
+    const interactionChannelId = interaction.channel_id;
     const guildId = interaction.guild_id || "@me";
     const messageId = interaction.message?.id;
 
-    if (!channelId || !messageId) {
+    if (!interactionChannelId || !messageId) {
       this.logger.warn("Missing channel_id or message_id in interaction");
       return;
     }
 
-    const threadId = this.encodeThreadId({
-      guildId,
-      channelId,
-    });
+    // Detect if the interaction is inside a thread channel (type 11 = public, 12 = private)
+    const channel = interaction.channel;
+    const isThread =
+      channel?.type === ChannelType.PublicThread ||
+      channel?.type === ChannelType.PrivateThread;
+    const parentChannelId =
+      isThread && channel?.parent_id ? channel.parent_id : interactionChannelId;
+
+    const threadId = isThread
+      ? this.encodeThreadId({
+          guildId,
+          channelId: parentChannelId,
+          threadId: interactionChannelId,
+        })
+      : this.encodeThreadId({
+          guildId,
+          channelId: interactionChannelId,
+        });
 
     const actionEvent: Omit<ActionEvent, "thread" | "openModal"> & {
       adapter: DiscordAdapter;

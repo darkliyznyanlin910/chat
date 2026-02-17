@@ -8,11 +8,17 @@
  */
 
 import type { ActionEvent, Channel, Message } from "chat";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import discordFixtures from "../fixtures/replay/channel/discord.json";
+import gchatFixtures from "../fixtures/replay/channel/gchat.json";
 import slackFixtures from "../fixtures/replay/channel/slack.json";
 import {
+  createDiscordTestContext,
+  createGchatTestContext,
   createSlackTestContext,
+  type DiscordTestContext,
   expectValidAction,
+  type GchatTestContext,
   type SlackTestContext,
 } from "./replay-test-utils";
 
@@ -210,6 +216,151 @@ describe("Replay Tests - Channel", () => {
       const channel1 = thread?.channel;
       const channel2 = thread?.channel;
       expect(channel1).toBe(channel2);
+    });
+  });
+
+  describe("Google Chat", () => {
+    let ctx: GchatTestContext;
+    let capturedAction: ActionEvent | null = null;
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      capturedAction = null;
+
+      ctx = createGchatTestContext(
+        {
+          botName: gchatFixtures.botName,
+          botUserId: gchatFixtures.botUserId,
+        },
+        {
+          onMention: async (thread) => {
+            await thread.subscribe();
+            await thread.post("Welcome!");
+          },
+          onAction: async (event) => {
+            capturedAction = event;
+          },
+        },
+      );
+    });
+
+    afterEach(async () => {
+      await ctx.chat.shutdown();
+    });
+
+    it("should handle channel-post action and access thread.channel", async () => {
+      // First subscribe via mention
+      await ctx.sendWebhook(gchatFixtures.mention);
+      ctx.mockChatApi.clearMocks();
+
+      // Send channel-post button click
+      await ctx.sendWebhook(gchatFixtures.channel_post_action);
+
+      expectValidAction(capturedAction, {
+        actionId: "channel-post",
+        userId: gchatFixtures.userId,
+        userName: gchatFixtures.userDisplayName,
+        adapterName: "gchat",
+        isDM: false,
+      });
+    });
+
+    it("should derive correct channel ID from thread", async () => {
+      await ctx.sendWebhook(gchatFixtures.mention);
+      await ctx.sendWebhook(gchatFixtures.channel_post_action);
+
+      const channel = capturedAction?.thread.channel;
+      expect(channel).toBeDefined();
+      expect(channel?.id).toBe(`gchat:${gchatFixtures.spaceName}`);
+    });
+
+    it("should fetch channel metadata via spaces.get", async () => {
+      await ctx.sendWebhook(gchatFixtures.mention);
+      await ctx.sendWebhook(gchatFixtures.channel_post_action);
+
+      const channel = capturedAction?.thread.channel;
+      expect(channel).toBeDefined();
+
+      const info = await channel?.fetchMetadata();
+      expect(info?.id).toBe(`gchat:${gchatFixtures.spaceName}`);
+      // MockChatApi returns "Test Space" as displayName
+      expect(info?.name).toBe("Test Space");
+      expect(info?.metadata).toBeDefined();
+    });
+
+    it("should post to channel top-level (no thread field)", async () => {
+      await ctx.sendWebhook(gchatFixtures.mention);
+      await ctx.sendWebhook(gchatFixtures.channel_post_action);
+
+      const channel = capturedAction?.thread.channel as Channel;
+      ctx.mockChatApi.clearMocks();
+
+      await channel.post("Hello from channel!");
+
+      // Verify spaces.messages.create was called
+      expect(ctx.mockChatApi.spaces.messages.create).toHaveBeenCalled();
+
+      // The sent message should have no thread field (top-level post)
+      const sentMessage = ctx.mockChatApi.sentMessages[0];
+      expect(sentMessage).toBeDefined();
+      expect(sentMessage?.parent).toBe(gchatFixtures.spaceName);
+      expect(sentMessage?.text).toBe("Hello from channel!");
+      // Top-level post: thread should be undefined (not scoped to a thread)
+      expect(sentMessage?.thread).toBeUndefined();
+    });
+
+    it("should cache channel instance on thread", async () => {
+      await ctx.sendWebhook(gchatFixtures.mention);
+      await ctx.sendWebhook(gchatFixtures.channel_post_action);
+
+      const thread = capturedAction?.thread;
+      const channel1 = thread?.channel;
+      const channel2 = thread?.channel;
+      expect(channel1).toBe(channel2);
+    });
+  });
+
+  describe("Discord", () => {
+    let ctx: DiscordTestContext;
+
+    afterEach(async () => {
+      if (ctx) {
+        await ctx.chat.shutdown();
+        ctx.cleanup();
+      }
+      vi.clearAllMocks();
+    });
+
+    it("should derive correct channel ID from thread", async () => {
+      ctx = await createDiscordTestContext(
+        { applicationId: discordFixtures.applicationId },
+        {
+          onMention: async (thread) => {
+            // Thread ID should include guild:channel:thread
+            const channel = thread.channel;
+            expect(channel).toBeDefined();
+            expect(channel.id).toBe(
+              `discord:${discordFixtures.guildId}:${discordFixtures.channelId}`,
+            );
+          },
+        },
+      );
+
+      await ctx.sendGatewayEvent(discordFixtures.mention);
+    });
+
+    it("should have channel.isDM = false for guild channels", async () => {
+      ctx = await createDiscordTestContext(
+        { applicationId: discordFixtures.applicationId },
+        {
+          onMention: async (thread) => {
+            const channel = thread.channel;
+            expect(channel.isDM).toBe(false);
+          },
+        },
+      );
+
+      await ctx.sendGatewayEvent(discordFixtures.mention);
     });
   });
 });
