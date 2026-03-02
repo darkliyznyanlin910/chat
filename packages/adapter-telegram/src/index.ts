@@ -1620,7 +1620,6 @@ export class TelegramAdapter
       text: this.formatConverter.renderPostable(message),
     };
   }
-
   private normalizeUserName(value: unknown): string {
     if (typeof value !== "string") {
       return "bot";

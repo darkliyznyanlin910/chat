@@ -258,6 +258,195 @@ describe("ThreadImpl", () => {
       );
     });
 
+    it("should support disabling the placeholder for fallback streaming", async () => {
+      mockAdapter.stream = undefined;
+
+      const threadNoPlaceholder = new ThreadImpl({
+        id: "slack:C123:1234.5678",
+        adapter: mockAdapter,
+        channelId: "C123",
+        stateAdapter: mockState,
+        fallbackStreamingPlaceholderText: null,
+      });
+
+      const textStream = createTextStream(["H", "i"]);
+      await threadNoPlaceholder.post(textStream);
+
+      expect(mockAdapter.postMessage).not.toHaveBeenCalledWith(
+        "slack:C123:1234.5678",
+        "..."
+      );
+      expect(mockAdapter.editMessage).toHaveBeenLastCalledWith(
+        "slack:C123:1234.5678",
+        "msg-1",
+        "Hi"
+      );
+    });
+
+    it("should handle empty stream with disabled placeholder", async () => {
+      mockAdapter.stream = undefined;
+
+      const threadNoPlaceholder = new ThreadImpl({
+        id: "slack:C123:1234.5678",
+        adapter: mockAdapter,
+        channelId: "C123",
+        stateAdapter: mockState,
+        fallbackStreamingPlaceholderText: null,
+      });
+
+      const textStream = createTextStream([]);
+      await threadNoPlaceholder.post(textStream);
+
+      // Should still post a message (empty) even with no chunks
+      expect(mockAdapter.postMessage).toHaveBeenCalledWith(
+        "slack:C123:1234.5678",
+        ""
+      );
+      // No edit needed since post content matches accumulated
+      expect(mockAdapter.editMessage).not.toHaveBeenCalled();
+    });
+
+    it("should preserve newlines in streamed text (native path)", async () => {
+      let capturedChunks: string[] = [];
+      const mockStream = vi
+        .fn()
+        .mockImplementation(
+          async (
+            _threadId: string,
+            textStream: AsyncIterable<string>
+          ) => {
+            capturedChunks = [];
+            for await (const chunk of textStream) {
+              capturedChunks.push(chunk);
+            }
+            return {
+              id: "msg-stream",
+              threadId: "t1",
+              raw: {},
+            };
+          }
+        );
+      mockAdapter.stream = mockStream;
+
+      // Simulate an LLM streaming two paragraphs with a single newline between them
+      const textStream = createTextStream([
+        "hello",
+        ".",
+        "\n",
+        "how",
+        " are",
+        " you?",
+      ]);
+      const result = await thread.post(textStream);
+
+      // The accumulated text should preserve the newline
+      expect(result.text).toBe("hello.\nhow are you?");
+      // All chunks should have been passed through to the adapter
+      expect(capturedChunks).toEqual([
+        "hello",
+        ".",
+        "\n",
+        "how",
+        " are",
+        " you?",
+      ]);
+    });
+
+    it("should preserve double newlines (paragraph breaks) in streamed text", async () => {
+      let capturedChunks: string[] = [];
+      const mockStream = vi
+        .fn()
+        .mockImplementation(
+          async (
+            _threadId: string,
+            textStream: AsyncIterable<string>
+          ) => {
+            capturedChunks = [];
+            for await (const chunk of textStream) {
+              capturedChunks.push(chunk);
+            }
+            return {
+              id: "msg-stream",
+              threadId: "t1",
+              raw: {},
+            };
+          }
+        );
+      mockAdapter.stream = mockStream;
+
+      // Simulate an LLM streaming two paragraphs with double newline
+      const textStream = createTextStream([
+        "hello.",
+        "\n\n",
+        "how are you?",
+      ]);
+      const result = await thread.post(textStream);
+
+      expect(result.text).toBe("hello.\n\nhow are you?");
+      expect(capturedChunks).toEqual([
+        "hello.",
+        "\n\n",
+        "how are you?",
+      ]);
+    });
+
+    it("should concatenate multi-step text without separator (demonstrates bug)", async () => {
+      let capturedChunks: string[] = [];
+      const mockStream = vi
+        .fn()
+        .mockImplementation(
+          async (
+            _threadId: string,
+            textStream: AsyncIterable<string>
+          ) => {
+            capturedChunks = [];
+            for await (const chunk of textStream) {
+              capturedChunks.push(chunk);
+            }
+            return {
+              id: "msg-stream",
+              threadId: "t1",
+              raw: {},
+            };
+          }
+        );
+      mockAdapter.stream = mockStream;
+
+      // Simulate a multi-step AI agent where step 1 produces "hello."
+      // and step 2 produces "how are you?" with NO separator between steps.
+      // This is what happens with AI SDK's textStream across tool-call steps.
+      const textStream = createTextStream([
+        "hello",
+        ".",
+        "how",
+        " are",
+        " you?",
+      ]);
+      const result = await thread.post(textStream);
+
+      // BUG: text from separate steps is concatenated without any whitespace
+      expect(result.text).toBe("hello.how are you?");
+    });
+
+    it("should preserve newlines in fallback streaming path", async () => {
+      mockAdapter.stream = undefined;
+
+      const textStream = createTextStream([
+        "hello.",
+        "\n",
+        "how are you?",
+      ]);
+      const result = await thread.post(textStream);
+
+      // Final edit should have all accumulated text with newline preserved
+      expect(mockAdapter.editMessage).toHaveBeenLastCalledWith(
+        "slack:C123:1234.5678",
+        "msg-1",
+        "hello.\nhow are you?"
+      );
+      expect(result.text).toBe("hello.\nhow are you?");
+    });
+
     it("should pass stream options from current message context", async () => {
       const mockStream = vi.fn().mockResolvedValue({
         id: "msg-stream",
