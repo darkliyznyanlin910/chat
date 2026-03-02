@@ -3085,14 +3085,33 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
 export function createSlackAdapter(
   config?: Partial<SlackAdapterConfig>
 ): SlackAdapter {
+  const mode = config?.mode ?? "webhook";
+  const appToken = config?.appToken ?? process.env.SLACK_APP_TOKEN;
+
+  if (mode === "socket") {
+    if (!appToken) {
+      throw new ValidationError(
+        "slack",
+        "appToken is required for socket mode. Set SLACK_APP_TOKEN or provide it in config."
+      );
+    }
+    if (config?.clientId || config?.clientSecret) {
+      throw new ValidationError(
+        "slack",
+        "Multi-workspace (clientId/clientSecret) is not supported in socket mode."
+      );
+    }
+  }
+
   const signingSecret =
     config?.signingSecret ?? process.env.SLACK_SIGNING_SECRET;
-  if (!signingSecret) {
+  if (mode === "webhook" && !signingSecret) {
     throw new ValidationError(
       "slack",
       "signingSecret is required. Set SLACK_SIGNING_SECRET or provide it in config."
     );
   }
+
   // Auth fields (botToken, clientId, clientSecret) are modal: botToken's
   // presence selects single-workspace mode, its absence selects multi-workspace
   // (per-team token lookup via installations). Only fall back to env vars
@@ -3100,6 +3119,8 @@ export function createSlackAdapter(
   const zeroConfig = !config;
 
   const resolved: SlackAdapterConfig = {
+    appToken,
+    mode,
     signingSecret,
     botToken:
       config?.botToken ??
