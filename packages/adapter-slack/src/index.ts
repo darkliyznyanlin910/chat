@@ -1552,7 +1552,7 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
     text: string,
     skipSelfMention: boolean
   ): Promise<string> {
-    const mentionPattern = /<@([A-Z0-9]+)(?:\|[^>]*)?>/g;
+    const mentionPattern = /<@([A-Z0-9]+)(?:\|[^<>]*)?>/g;
     const userIds = new Set<string>();
     let match: RegExpExecArray | null = mentionPattern.exec(text);
     while (match) {
@@ -1582,7 +1582,7 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
     const nameMap = new Map(lookups);
 
     // Replace <@U123> and <@U123|old> with <@U123|resolvedName>
-    return text.replace(/<@([A-Z0-9]+)(?:\|[^>]*)?>/g, (_m, uid: string) => {
+    return text.replace(/<@([A-Z0-9]+)(?:\|[^<>]*)?>/g, (_m, uid: string) => {
       const name = nameMap.get(uid);
       return name ? `<@${uid}|${name}>` : `<@${uid}>`;
     });
