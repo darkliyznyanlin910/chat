@@ -804,10 +804,17 @@ describe("TelegramAdapter", () => {
 
     const sendMessageBody = JSON.parse(
       String((mockFetch.mock.calls[1]?.[1] as RequestInit).body)
-    ) as { chat_id: string; text: string };
+    ) as { chat_id: string; text: string; parse_mode?: string };
+    const editMessageBody = JSON.parse(
+      String((mockFetch.mock.calls[2]?.[1] as RequestInit).body)
+    ) as { chat_id: string; text: string; parse_mode?: string };
 
     expect(sendMessageBody.chat_id).toBe("123");
     expect(sendMessageBody.text).toBe("hello");
+    expect(sendMessageBody.parse_mode).toBe("HTML");
+    expect(editMessageBody.chat_id).toBe("123");
+    expect(editMessageBody.text).toBe("updated");
+    expect(editMessageBody.parse_mode).toBeUndefined();
   });
 
   it("posts cards with inline keyboard buttons", async () => {
@@ -857,6 +864,8 @@ describe("TelegramAdapter", () => {
     const sendMessageBody = JSON.parse(
       String((mockFetch.mock.calls[1]?.[1] as RequestInit).body)
     ) as {
+      text: string;
+      parse_mode?: string;
       reply_markup?: {
         inline_keyboard: Array<
           Array<{ text: string; callback_data?: string; url?: string }>
@@ -866,7 +875,8 @@ describe("TelegramAdapter", () => {
 
     const row = sendMessageBody.reply_markup?.inline_keyboard[0];
     expect(row).toBeDefined();
-    expect(sendMessageBody.parse_mode).toBe("Markdown");
+    expect(sendMessageBody.parse_mode).toBe("HTML");
+    expect(sendMessageBody.text).toContain("<b>Approval needed</b>");
     expect(row?.[0]).toEqual({
       text: "Approve",
       callback_data: encodeTelegramCallbackData("approve", "request-123"),
@@ -934,7 +944,7 @@ describe("TelegramAdapter", () => {
     ) as { chat_id: string; draft_id: string; text: string };
     const finalBody = JSON.parse(
       String((mockFetch.mock.calls[3]?.[1] as RequestInit).body)
-    ) as { chat_id: string; text: string };
+    ) as { chat_id: string; text: string; parse_mode?: string };
 
     expect(draftBody1.chat_id).toBe("123");
     expect(draftBody2.chat_id).toBe("123");
@@ -943,6 +953,7 @@ describe("TelegramAdapter", () => {
     expect(draftBody1.draft_id).toBe(draftBody2.draft_id);
     expect(finalBody.chat_id).toBe("123");
     expect(finalBody.text).toBe("hello world");
+    expect(finalBody.parse_mode).toBe("HTML");
   });
 
   it("falls back to post+edit streaming in non-DM chats", async () => {
@@ -1006,12 +1017,13 @@ describe("TelegramAdapter", () => {
     ) as { chat_id: string; text: string };
     const editBody = JSON.parse(
       String((mockFetch.mock.calls[2]?.[1] as RequestInit).body)
-    ) as { chat_id: string; text: string };
+    ) as { chat_id: string; text: string; parse_mode?: string };
 
     expect(postBody.chat_id).toBe("-100123");
     expect(postBody.text).toBe("...");
     expect(editBody.chat_id).toBe("-100123");
     expect(editBody.text).toBe("hello");
+    expect(editBody.parse_mode).toBe("HTML");
   });
 
   it("falls back to post+edit when sendMessageDraft is unavailable", async () => {
@@ -1126,6 +1138,44 @@ describe("TelegramAdapter", () => {
     expect(draftUrl).toContain("/sendMessageDraft");
     expect(postUrl).toContain("/sendMessage");
     expect(editUrl).toContain("/editMessageText");
+  });
+
+  it("renders markdown with Telegram HTML parse mode", async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        telegramOk({
+          id: 999,
+          is_bot: true,
+          first_name: "Bot",
+          username: "mybot",
+        })
+      )
+      .mockResolvedValueOnce(telegramOk(sampleMessage()));
+
+    const adapter = createTelegramAdapter({
+      botToken: "token",
+      mode: "webhook",
+      logger: mockLogger,
+      userName: "mybot",
+    });
+
+    await adapter.initialize(createMockChat());
+
+    await adapter.postMessage("telegram:123", {
+      markdown: "**Bold** _italic_ [Docs](https://example.com) `code`",
+    });
+
+    const sendMessageBody = JSON.parse(
+      String((mockFetch.mock.calls[1]?.[1] as RequestInit).body)
+    ) as { text: string; parse_mode?: string };
+
+    expect(sendMessageBody.parse_mode).toBe("HTML");
+    expect(sendMessageBody.text).toContain("<b>Bold</b>");
+    expect(sendMessageBody.text).toContain("<i>italic</i>");
+    expect(sendMessageBody.text).toContain(
+      '<a href="https://example.com">Docs</a>'
+    );
+    expect(sendMessageBody.text).toContain("<code>code</code>");
   });
 
   it("cleans up placeholder and throws when fallback stream is empty", async () => {

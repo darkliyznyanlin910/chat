@@ -13,6 +13,7 @@ import type {
   Adapter,
   AdapterPostableMessage,
   Attachment,
+  CardElement,
   ChannelInfo,
   ChatInstance,
   EmojiValue,
@@ -64,7 +65,7 @@ const TELEGRAM_MESSAGE_LIMIT = 4096;
 const TELEGRAM_CAPTION_LIMIT = 1024;
 const TELEGRAM_SECRET_TOKEN_HEADER = "x-telegram-bot-api-secret-token";
 const MESSAGE_ID_PATTERN = /^([^:]+):(\d+)$/;
-const TELEGRAM_MARKDOWN_PARSE_MODE = "Markdown";
+const TELEGRAM_HTML_PARSE_MODE = "HTML";
 const TRAILING_SLASHES_REGEX = /\/+$/;
 const MESSAGE_SEQUENCE_PATTERN = /:(\d+)$/;
 const LEADING_AT_PATTERN = /^@+/;
@@ -529,14 +530,11 @@ export class TelegramAdapter
 
     const card = extractCard(message);
     const replyMarkup = card ? cardToTelegramInlineKeyboard(card) : undefined;
-    const parseMode = card ? TELEGRAM_MARKDOWN_PARSE_MODE : undefined;
+    const rendered = card
+      ? this.renderTelegramCardText(card)
+      : this.renderTelegramText(message);
     const text = this.truncateMessage(
-      convertEmojiPlaceholders(
-        card
-          ? cardToFallbackText(card)
-          : this.formatConverter.renderPostable(message),
-        "gchat"
-      )
+      convertEmojiPlaceholders(rendered.text, "gchat")
     );
 
     const files = extractFiles(message);
@@ -559,7 +557,7 @@ export class TelegramAdapter
         file,
         text,
         replyMarkup,
-        parseMode
+        rendered.parseMode
       );
     } else {
       if (!text.trim()) {
@@ -571,7 +569,7 @@ export class TelegramAdapter
         message_thread_id: parsedThread.messageThreadId,
         text,
         reply_markup: replyMarkup,
-        parse_mode: parseMode,
+        parse_mode: rendered.parseMode,
       });
     }
 
@@ -616,14 +614,11 @@ export class TelegramAdapter
 
     const card = extractCard(message);
     const replyMarkup = card ? cardToTelegramInlineKeyboard(card) : undefined;
-    const parseMode = card ? TELEGRAM_MARKDOWN_PARSE_MODE : undefined;
+    const rendered = card
+      ? this.renderTelegramCardText(card)
+      : this.renderTelegramText(message);
     const text = this.truncateMessage(
-      convertEmojiPlaceholders(
-        card
-          ? cardToFallbackText(card)
-          : this.formatConverter.renderPostable(message),
-        "gchat"
-      )
+      convertEmojiPlaceholders(rendered.text, "gchat")
     );
 
     if (!text.trim()) {
@@ -637,7 +632,7 @@ export class TelegramAdapter
         message_id: telegramMessageId,
         text,
         reply_markup: replyMarkup ?? emptyTelegramInlineKeyboard(),
-        parse_mode: parseMode,
+        parse_mode: rendered.parseMode,
       }
     );
 
@@ -850,7 +845,7 @@ export class TelegramAdapter
       }
     }
 
-    return this.postMessage(threadId, rawAccumulated);
+    return this.postMessage(threadId, { markdown: rawAccumulated });
   }
 
   async fetchMessages(
@@ -1499,7 +1494,9 @@ export class TelegramAdapter
       }
 
       try {
-        await this.editMessage(threadIdForEdits, posted.id, rawAccumulated);
+        await this.editMessage(threadIdForEdits, posted.id, {
+          markdown: rawAccumulated,
+        });
         lastRendered = rendered;
         lastEditAt = now;
       } catch (error) {
@@ -1526,7 +1523,9 @@ export class TelegramAdapter
 
     const finalRendered = this.renderStreamText(rawAccumulated);
     if (finalRendered.trim() && finalRendered !== lastRendered) {
-      return this.editMessage(threadIdForEdits, posted.id, rawAccumulated);
+      return this.editMessage(threadIdForEdits, posted.id, {
+        markdown: rawAccumulated,
+      });
     }
 
     return posted;
@@ -1578,6 +1577,48 @@ export class TelegramAdapter
   private renderStreamText(rawText: string): string {
     // Telegram expects Unicode emoji, and the gchat resolver emits Unicode output.
     return this.truncateMessage(convertEmojiPlaceholders(rawText, "gchat"));
+  }
+
+  private renderTelegramCardText(card: CardElement): {
+    text: string;
+    parseMode: string;
+  } {
+    return {
+      text: this.formatConverter.fromMarkdown(
+        cardToFallbackText(card, { boldFormat: "**" })
+      ),
+      parseMode: TELEGRAM_HTML_PARSE_MODE,
+    };
+  }
+
+  private renderTelegramText(
+    message: AdapterPostableMessage
+  ): { text: string; parseMode?: string } {
+    if (typeof message === "string") {
+      return { text: message };
+    }
+
+    if ("raw" in message) {
+      return { text: message.raw };
+    }
+
+    if ("markdown" in message) {
+      return {
+        text: this.formatConverter.fromMarkdown(message.markdown),
+        parseMode: TELEGRAM_HTML_PARSE_MODE,
+      };
+    }
+
+    if ("ast" in message) {
+      return {
+        text: this.formatConverter.fromAst(message.ast),
+        parseMode: TELEGRAM_HTML_PARSE_MODE,
+      };
+    }
+
+    return {
+      text: this.formatConverter.renderPostable(message),
+    };
   }
 
   private normalizeUserName(value: unknown): string {

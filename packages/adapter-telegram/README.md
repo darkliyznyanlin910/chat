@@ -27,7 +27,7 @@ const bot = new Chat({
 });
 ```
 
-Features include mentions, reactions, typing indicators, file uploads, Telegram draft streaming in DMs (`sendMessageDraft`) with post+edit fallback elsewhere, and card fallback rendering with inline keyboard buttons for card actions.
+Features include mentions, reactions, typing indicators, file uploads, Markdown/AST formatting via Telegram HTML parse mode, Telegram draft streaming in DMs (`sendMessageDraft`) with post+edit fallback elsewhere, and card fallback rendering with inline keyboard buttons for card actions.
 
 ## Polling mode
 
