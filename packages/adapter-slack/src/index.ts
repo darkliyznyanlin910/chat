@@ -1190,10 +1190,16 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
 
     switch (type) {
       case "event_callback":
-        this.processEventPayload(
-          body as unknown as SlackWebhookPayload,
-          options
-        );
+        try {
+          this.processEventPayload(
+            body as unknown as SlackWebhookPayload,
+            options
+          );
+        } catch (error) {
+          this.logger.error("Error processing socket mode event_callback", {
+            error,
+          });
+        }
         break;
 
       case "slash_commands": {
