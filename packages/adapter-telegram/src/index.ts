@@ -749,10 +749,7 @@ export class TelegramAdapter
       return this.streamViaPostEdit(threadId, textStream, options);
     }
 
-    const updateIntervalMs = Math.max(
-      0,
-      options?.updateIntervalMs ?? TELEGRAM_DEFAULT_STREAM_UPDATE_INTERVAL_MS
-    );
+    const updateIntervalMs = this.resolveStreamUpdateInterval(options);
 
     const iterator = textStream[Symbol.asyncIterator]();
     const draftId = this.createDraftId();
@@ -801,22 +798,10 @@ export class TelegramAdapter
             "Telegram: sendMessageDraft unavailable, falling back to post+edit streaming"
           );
 
-          const resumedTextStream = (async function* (
-            consumed: string,
-            remaining: AsyncIterator<string>
-          ): AsyncIterable<string> {
-            if (consumed) {
-              yield consumed;
-            }
-
-            while (true) {
-              const item = await remaining.next();
-              if (item.done) {
-                return;
-              }
-              yield item.value;
-            }
-          })(rawAccumulated, iterator);
+          const resumedTextStream = this.resumeStreamFrom(
+            rawAccumulated,
+            iterator
+          );
 
           return this.streamViaPostEdit(threadId, resumedTextStream, options);
         }
@@ -1476,14 +1461,8 @@ export class TelegramAdapter
     textStream: AsyncIterable<string>,
     options?: StreamOptions
   ): Promise<RawMessage<TelegramRawMessage>> {
-    const intervalMs = Math.max(
-      0,
-      options?.updateIntervalMs ?? TELEGRAM_DEFAULT_STREAM_UPDATE_INTERVAL_MS
-    );
-    const placeholderText =
-      options?.fallbackPlaceholderText === undefined
-        ? TELEGRAM_STREAM_PLACEHOLDER
-        : options.fallbackPlaceholderText;
+    const intervalMs = this.resolveStreamUpdateInterval(options);
+    const placeholderText = this.resolveFallbackPlaceholderText(options);
     let posted =
       placeholderText === null
         ? null
@@ -1570,6 +1549,40 @@ export class TelegramAdapter
     }
 
     return posted;
+  }
+
+  private resolveStreamUpdateInterval(options?: StreamOptions): number {
+    return Math.max(
+      0,
+      options?.updateIntervalMs ?? TELEGRAM_DEFAULT_STREAM_UPDATE_INTERVAL_MS
+    );
+  }
+
+  private resolveFallbackPlaceholderText(
+    options?: StreamOptions
+  ): string | null {
+    return options?.fallbackPlaceholderText === undefined
+      ? TELEGRAM_STREAM_PLACEHOLDER
+      : options.fallbackPlaceholderText;
+  }
+
+  private resumeStreamFrom(
+    consumed: string,
+    remaining: AsyncIterator<string>
+  ): AsyncIterable<string> {
+    return (async function* () {
+      if (consumed) {
+        yield consumed;
+      }
+
+      while (true) {
+        const item = await remaining.next();
+        if (item.done) {
+          return;
+        }
+        yield item.value;
+      }
+    })();
   }
 
   private createDraftId(): string {
