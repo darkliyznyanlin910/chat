@@ -231,6 +231,8 @@ export type {
   Lock,
   Logger,
   LogLevel,
+  MemberJoinedChannelEvent,
+  MemberJoinedChannelHandler,
   MentionHandler,
   MessageHandler,
   MessageMetadata,
