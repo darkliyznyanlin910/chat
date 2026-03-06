@@ -786,7 +786,6 @@ export class TelegramAdapter
     let renderedAccumulated = "";
     let lastDraftText = "";
     let lastDraftSentAt = 0;
-    let draftStreamingEnabled = true;
     let draftUpdatesSent = 0;
 
     while (true) {
@@ -798,7 +797,7 @@ export class TelegramAdapter
       rawAccumulated += next.value;
       renderedAccumulated = this.renderStreamMarkdown(rawAccumulated);
 
-      if (!(draftStreamingEnabled && renderedAccumulated.trim())) {
+      if (!renderedAccumulated.trim()) {
         continue;
       }
 
@@ -822,26 +821,20 @@ export class TelegramAdapter
         lastDraftSentAt = now;
         draftUpdatesSent += 1;
       } catch (error) {
-        if (draftUpdatesSent === 0 && this.isDraftMethodUnsupported(error)) {
-          this.logger.info(
-            "Telegram: sendMessageDraft unavailable, falling back to post+edit streaming"
-          );
+        const isUnsupported =
+          draftUpdatesSent === 0 && this.isDraftMethodUnsupported(error);
 
-          const resumedTextStream = this.resumeStreamFrom(
-            rawAccumulated,
-            iterator
-          );
-
-          return this.streamViaPostEdit(threadId, resumedTextStream, options);
-        }
-
-        this.logger.warn(
-          "Telegram: sendMessageDraft failed during stream; continuing without draft updates",
-          {
-            error: String(error),
-          }
+        this.logger[isUnsupported ? "info" : "warn"](
+          `Telegram: sendMessageDraft ${isUnsupported ? "unavailable" : "failed during stream"}, falling back to post+edit streaming`,
+          isUnsupported ? undefined : { error: String(error) }
         );
-        draftStreamingEnabled = false;
+
+        const resumedTextStream = this.resumeStreamFrom(
+          rawAccumulated,
+          iterator
+        );
+
+        return this.streamViaPostEdit(threadId, resumedTextStream, options);
       }
     }
 
@@ -850,7 +843,7 @@ export class TelegramAdapter
     }
 
     renderedAccumulated = this.renderStreamMarkdown(rawAccumulated);
-    if (draftStreamingEnabled && renderedAccumulated !== lastDraftText) {
+    if (renderedAccumulated !== lastDraftText) {
       try {
         await this.sendDraftMessage(
           parsedThread.chatId,
