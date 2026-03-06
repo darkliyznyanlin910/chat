@@ -1499,11 +1499,10 @@ export class TelegramAdapter
 
     for await (const chunk of textStream) {
       rawAccumulated += chunk;
-
-      const rendered = this.renderStreamMarkdown(rawAccumulated);
       const now = Date.now();
 
       if (!posted) {
+        const rendered = this.renderStreamMarkdown(rawAccumulated);
         if (!rendered.trim()) {
           continue;
         }
@@ -1517,12 +1516,12 @@ export class TelegramAdapter
         continue;
       }
 
-      const shouldEdit =
-        rendered.trim() &&
-        rendered !== lastRendered &&
-        now - lastEditAt >= intervalMs;
+      if (now - lastEditAt < intervalMs) {
+        continue;
+      }
 
-      if (!shouldEdit) {
+      const rendered = this.renderStreamMarkdown(rawAccumulated);
+      if (!rendered.trim() || rendered === lastRendered) {
         continue;
       }
 
