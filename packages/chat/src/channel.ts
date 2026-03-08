@@ -430,16 +430,9 @@ export class ChannelImpl<TState = Record<string, unknown>>
 
 /**
  * Derive the channel ID from a thread ID.
- * Uses adapter.channelIdFromThreadId if available, otherwise defaults to
- * first two colon-separated parts.
  */
 export function deriveChannelId(adapter: Adapter, threadId: string): string {
-  if (adapter.channelIdFromThreadId) {
-    return adapter.channelIdFromThreadId(threadId);
-  }
-  // Default: first two colon-separated parts
-  const parts = threadId.split(":");
-  return parts.slice(0, 2).join(":");
+  return adapter.channelIdFromThreadId(threadId);
 }
 
 /**

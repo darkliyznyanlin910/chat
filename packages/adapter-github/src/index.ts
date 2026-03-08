@@ -231,11 +231,12 @@ export class GitHubAdapter
 
     // Multi-tenant mode - need an installation ID
     if (!this.appCredentials) {
-      throw new Error("Adapter not properly configured");
+      throw new ValidationError("github", "Adapter not properly configured");
     }
 
     if (!installationId) {
-      throw new Error(
+      throw new ValidationError(
+        "github",
         "Installation ID required for multi-tenant mode. " +
           "This usually means you're trying to make an API call outside of a webhook context. " +
           "For proactive messages, use thread IDs from previous webhook interactions."

@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   AdapterRateLimitError,
+  AuthenticationError,
   extractCard,
   extractFiles,
   NetworkError,
@@ -38,7 +39,6 @@ import type {
 } from "chat";
 
 import {
-  ChatError,
   ConsoleLogger,
   convertEmojiPlaceholders,
   defaultEmojiResolver,
@@ -395,9 +395,9 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
     if (this.defaultBotToken) {
       return this.defaultBotToken;
     }
-    throw new ChatError(
-      "No bot token available. In multi-workspace mode, ensure the webhook is being processed.",
-      "MISSING_BOT_TOKEN"
+    throw new AuthenticationError(
+      "slack",
+      "No bot token available. In multi-workspace mode, ensure the webhook is being processed."
     );
   }
 
@@ -455,9 +455,9 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
     installation: SlackInstallation
   ): Promise<void> {
     if (!this.chat) {
-      throw new ChatError(
-        "Adapter not initialized. Ensure chat.initialize() has been called first.",
-        "NOT_INITIALIZED"
+      throw new ValidationError(
+        "slack",
+        "Adapter not initialized. Ensure chat.initialize() has been called first."
       );
     }
 
@@ -483,9 +483,9 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
    */
   async getInstallation(teamId: string): Promise<SlackInstallation | null> {
     if (!this.chat) {
-      throw new ChatError(
-        "Adapter not initialized. Ensure chat.initialize() has been called first.",
-        "NOT_INITIALIZED"
+      throw new ValidationError(
+        "slack",
+        "Adapter not initialized. Ensure chat.initialize() has been called first."
       );
     }
 
@@ -524,18 +524,18 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
     request: Request
   ): Promise<{ teamId: string; installation: SlackInstallation }> {
     if (!(this.clientId && this.clientSecret)) {
-      throw new ChatError(
-        "clientId and clientSecret are required for OAuth. Pass them in createSlackAdapter().",
-        "MISSING_OAUTH_CONFIG"
+      throw new ValidationError(
+        "slack",
+        "clientId and clientSecret are required for OAuth. Pass them in createSlackAdapter()."
       );
     }
 
     const url = new URL(request.url);
     const code = url.searchParams.get("code");
     if (!code) {
-      throw new ChatError(
-        "Missing 'code' query parameter in OAuth callback request.",
-        "MISSING_OAUTH_CODE"
+      throw new ValidationError(
+        "slack",
+        "Missing 'code' query parameter in OAuth callback request."
       );
     }
 
@@ -549,9 +549,9 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
     });
 
     if (!(result.ok && result.access_token && result.team?.id)) {
-      throw new ChatError(
-        `Slack OAuth failed: ${result.error || "missing access_token or team.id"}`,
-        "OAUTH_FAILED"
+      throw new AuthenticationError(
+        "slack",
+        `Slack OAuth failed: ${result.error || "missing access_token or team.id"}`
       );
     }
 
@@ -572,9 +572,9 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
    */
   async deleteInstallation(teamId: string): Promise<void> {
     if (!this.chat) {
-      throw new ChatError(
-        "Adapter not initialized. Ensure chat.initialize() has been called first.",
-        "NOT_INITIALIZED"
+      throw new ValidationError(
+        "slack",
+        "Adapter not initialized. Ensure chat.initialize() has been called first."
       );
     }
 
@@ -1113,7 +1113,10 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
     if (isJSX(modal)) {
       const converted = toModalElement(modal);
       if (!converted) {
-        throw new Error("Invalid JSX element: must be a Modal element");
+        throw new ValidationError(
+          "slack",
+          "Invalid JSX element: must be a Modal element"
+        );
       }
       return converted;
     }
@@ -2391,9 +2394,9 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
     options?: StreamOptions
   ): Promise<RawMessage<unknown>> {
     if (!(options?.recipientUserId && options?.recipientTeamId)) {
-      throw new ChatError(
-        "Slack streaming requires recipientUserId and recipientTeamId in options",
-        "MISSING_STREAM_OPTIONS"
+      throw new ValidationError(
+        "slack",
+        "Slack streaming requires recipientUserId and recipientTeamId in options"
       );
     }
     const { channel, threadTs } = this.decodeThreadId(threadId);
@@ -3254,9 +3257,9 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
     } else {
       const message = options?.message;
       if (!message) {
-        throw new ChatError(
-          "Message required for replace action",
-          "INVALID_ARGS"
+        throw new ValidationError(
+          "slack",
+          "Message required for replace action"
         );
       }
       const card = extractCard(message);
@@ -3305,9 +3308,9 @@ export class SlackAdapter implements Adapter<SlackThreadId, unknown> {
         status: response.status,
         body: errorText,
       });
-      throw new ChatError(
-        `Failed to ${action} via response_url: ${errorText}`,
-        response.status.toString()
+      throw new NetworkError(
+        "slack",
+        `Failed to ${action} via response_url: ${errorText}`
       );
     }
     const responseText = await response.text();

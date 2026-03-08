@@ -91,7 +91,7 @@ export function createMockAdapter(name = "slack"): Adapter {
     postChannelMessage: vi
       .fn()
       .mockResolvedValue({ id: "msg-1", threadId: undefined, raw: {} }),
-  };
+  } satisfies Adapter;
 }
 
 /**

@@ -128,7 +128,7 @@ export interface Adapter<TThreadId = unknown, TRawMessage = unknown> {
    * Default fallback: first two colon-separated parts (e.g., "slack:C123").
    * Adapters with different structures should override this.
    */
-  channelIdFromThreadId?(threadId: string): string;
+  channelIdFromThreadId(threadId: string): string;
 
   /** Decode thread ID string back to platform-specific data */
   decodeThreadId(threadId: string): TThreadId;
@@ -298,7 +298,7 @@ export interface Adapter<TThreadId = unknown, TRawMessage = unknown> {
     threadId: string,
     userId: string,
     message: AdapterPostableMessage
-  ): Promise<EphemeralMessage>;
+  ): Promise<EphemeralMessage<TRawMessage>>;
 
   /** Post a message to a thread */
   postMessage(
@@ -620,7 +620,7 @@ export interface Postable<
     user: string | Author,
     message: AdapterPostableMessage | ChatElement,
     options: PostEphemeralOptions
-  ): Promise<EphemeralMessage | null>;
+  ): Promise<EphemeralMessage<TRawMessage> | null>;
 
   /**
    * Set the state. Merges with existing state by default.
@@ -835,7 +835,7 @@ export interface Thread<TState = Record<string, unknown>, TRawMessage = unknown>
     user: string | Author,
     message: AdapterPostableMessage | ChatElement,
     options: PostEphemeralOptions
-  ): Promise<EphemeralMessage | null>;
+  ): Promise<EphemeralMessage<TRawMessage> | null>;
 
   /** Recently fetched messages (cached) */
   recentMessages: Message<TRawMessage>[];
@@ -1031,11 +1031,11 @@ export interface SentMessage<TRawMessage = unknown>
  * Ephemeral messages are visible only to a specific user and typically
  * cannot be edited or deleted (platform-dependent).
  */
-export interface EphemeralMessage {
+export interface EphemeralMessage<TRawMessage = unknown> {
   /** Message ID (may be empty for some platforms) */
   id: string;
   /** Platform-specific raw response */
-  raw: unknown;
+  raw: TRawMessage;
   /** Thread ID where message was sent (or DM thread if fallback was used) */
   threadId: string;
   /** Whether this used native ephemeral or fell back to DM */

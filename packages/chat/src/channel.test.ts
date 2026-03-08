@@ -553,23 +553,17 @@ describe("deriveChannelId", () => {
     );
   });
 
-  it("should use default fallback (first two parts)", () => {
-    const mockAdapter = createMockAdapter();
-    mockAdapter.channelIdFromThreadId = undefined;
-
-    const channelId = deriveChannelId(mockAdapter, "slack:C123:1234.5678");
-    expect(channelId).toBe("slack:C123");
-  });
-
   it("should work with different adapters", () => {
     const mockAdapter = createMockAdapter("gchat");
-    mockAdapter.channelIdFromThreadId = undefined;
 
     const channelId = deriveChannelId(
       mockAdapter,
       "gchat:spaces/ABC123:dGhyZWFk"
     );
     expect(channelId).toBe("gchat:spaces/ABC123");
+    expect(mockAdapter.channelIdFromThreadId).toHaveBeenCalledWith(
+      "gchat:spaces/ABC123:dGhyZWFk"
+    );
   });
 });
 
