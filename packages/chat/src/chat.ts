@@ -1488,6 +1488,8 @@ export class Chat<
       if (resolution === "force") {
         this.logger.info("Force-releasing lock on thread", { threadId });
         await this._stateAdapter.forceReleaseLock(threadId);
+        // Note: another instance could acquire the lock between release and re-acquire.
+        // If that happens, lock will be null and we fall through to the LockError below.
         lock = await this._stateAdapter.acquireLock(
           threadId,
           DEFAULT_LOCK_TTL_MS
