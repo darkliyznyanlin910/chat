@@ -62,7 +62,10 @@ export interface ChatConfig<
   onLockConflict?:
     | "force"
     | "drop"
-    | ((threadId: string, message: Message) => "force" | "drop");
+    | ((
+        threadId: string,
+        message: Message
+      ) => "force" | "drop" | Promise<"force" | "drop">);
   /** Default bot username across all adapters */
   userName: string;
 }

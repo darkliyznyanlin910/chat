@@ -1483,7 +1483,7 @@ export class Chat<
     if (!lock) {
       const resolution =
         typeof this._onLockConflict === "function"
-          ? this._onLockConflict(threadId, message)
+          ? await this._onLockConflict(threadId, message)
           : (this._onLockConflict ?? "drop");
       if (resolution === "force") {
         this.logger.info("Force-releasing lock on thread", { threadId });
