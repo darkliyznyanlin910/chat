@@ -469,7 +469,7 @@ describe("Chat", () => {
       expect(mentionHandler).toHaveBeenCalled();
     });
 
-    it("should route subscribed DM threads to onSubscribedMessage", async () => {
+    it("should route subscribed DM threads to onDirectMessage, not onSubscribedMessage", async () => {
       const dmHandler = vi.fn().mockResolvedValue(undefined);
       const subscribedHandler = vi.fn().mockResolvedValue(undefined);
 
@@ -485,8 +485,8 @@ describe("Chat", () => {
         message
       );
 
-      expect(subscribedHandler).toHaveBeenCalled();
-      expect(dmHandler).not.toHaveBeenCalled();
+      expect(dmHandler).toHaveBeenCalled();
+      expect(subscribedHandler).not.toHaveBeenCalled();
     });
 
     it("should not route non-DM mentions to directMessage handler", async () => {
@@ -2033,6 +2033,56 @@ describe("Chat", () => {
       expect(modalSubmitEvent?.relatedChannel?.id).toBe("slack:C789");
       expect(modalSubmitEvent?.relatedThread).toBeDefined();
       expect(modalSubmitEvent?.relatedThread?.id).toBe("slack:C789:1234.5678");
+    });
+  });
+
+  describe("persistMessageHistory", () => {
+    it("should cache incoming messages when adapter has persistMessageHistory", async () => {
+      const adapter = createMockAdapter("whatsapp");
+      (adapter as { persistMessageHistory: boolean }).persistMessageHistory =
+        true;
+      const state = createMockState();
+
+      const persistChat = new Chat({
+        userName: "testbot",
+        adapters: { whatsapp: adapter },
+        state,
+        logger: mockLogger,
+      });
+
+      await persistChat.webhooks.whatsapp(
+        new Request("http://test.com", { method: "POST" })
+      );
+
+      const message = createTestMessage("msg-1", "Hello from WhatsApp");
+      await persistChat.handleIncomingMessage(
+        adapter,
+        "whatsapp:phone:user1",
+        message
+      );
+
+      // Check that message was stored in state cache
+      const stored = state.cache.get("msg-history:whatsapp:phone:user1");
+      expect(stored).toBeDefined();
+      expect(Array.isArray(stored)).toBe(true);
+      expect((stored as Array<{ id: string }>)[0].id).toBe("msg-1");
+    });
+
+    it("should NOT cache incoming messages when adapter does not set persistMessageHistory", async () => {
+      const message = createTestMessage("msg-2", "Hello from Slack");
+      await chat.handleIncomingMessage(
+        mockAdapter,
+        "slack:C123:1234.5678",
+        message
+      );
+
+      // No msg-history key should exist
+      const stored = (mockState as unknown as { cache: Map<string, unknown> })
+        .cache;
+      const historyKeys = [...stored.keys()].filter((k) =>
+        k.startsWith("msg-history:")
+      );
+      expect(historyKeys).toHaveLength(0);
     });
   });
 });

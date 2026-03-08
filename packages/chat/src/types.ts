@@ -54,6 +54,16 @@ export interface ChatConfig<
    * Pass "silent" to disable all logging.
    */
   logger?: Logger | LogLevel;
+  /**
+   * Configuration for persistent message history.
+   * Only used by adapters that set `persistMessageHistory: true`.
+   */
+  messageHistory?: {
+    /** Maximum messages to store per thread (default: 100) */
+    maxMessages?: number;
+    /** TTL for cached history in milliseconds (default: 7 days) */
+    ttlMs?: number;
+  };
   /** State adapter for subscriptions and locking */
   state: StateAdapter;
   /**
@@ -256,6 +266,12 @@ export interface Adapter<TThreadId = unknown, TRawMessage = unknown> {
 
   /** Parse platform message format to normalized format */
   parseMessage(raw: TRawMessage): Message<TRawMessage>;
+
+  /**
+   * When true, the SDK persists message history in the state adapter for this platform.
+   * Use this for platforms that lack server-side message history APIs (e.g., WhatsApp, Telegram).
+   */
+  readonly persistMessageHistory?: boolean;
 
   /**
    * Post a message to channel top-level (not in a thread).
@@ -508,6 +524,14 @@ export interface ChatInstance {
 export interface StateAdapter {
   /** Acquire a lock on a thread (returns null if already locked) */
   acquireLock(threadId: string, ttlMs: number): Promise<Lock | null>;
+
+  /** Atomically append a value to a list. Trims to maxLength (keeping newest). Refreshes TTL. */
+  appendToList(
+    key: string,
+    value: unknown,
+    options?: { maxLength?: number; ttlMs?: number }
+  ): Promise<void>;
+
   /** Connect to the state backend */
   connect(): Promise<void>;
 
@@ -522,6 +546,9 @@ export interface StateAdapter {
 
   /** Get a cached value by key */
   get<T = unknown>(key: string): Promise<T | null>;
+
+  /** Read all values from a list in insertion order. Returns empty array if key does not exist. */
+  getList<T = unknown>(key: string): Promise<T[]>;
 
   /** Check if subscribed to a thread */
   isSubscribed(threadId: string): Promise<boolean>;

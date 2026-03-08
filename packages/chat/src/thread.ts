@@ -13,6 +13,7 @@ import {
   toPlainText,
 } from "./markdown";
 import { Message, type SerializedMessage } from "./message";
+import type { MessageHistoryCache } from "./message-history";
 import { StreamingMarkdownRenderer } from "./streaming-markdown";
 import type {
   Adapter,
@@ -56,6 +57,7 @@ interface ThreadImplConfigWithAdapter {
   initialMessage?: Message;
   isDM?: boolean;
   isSubscribedContext?: boolean;
+  messageHistory?: MessageHistoryCache;
   stateAdapter: StateAdapter;
   streamingUpdateIntervalMs?: number;
 }
@@ -121,6 +123,8 @@ export class ThreadImpl<TState = Record<string, unknown>>
   private readonly _fallbackStreamingPlaceholderText: string | null;
   /** Cached channel instance */
   private _channel?: Channel<TState>;
+  /** Message history cache (set only for adapters with persistMessageHistory) */
+  private readonly _messageHistory?: MessageHistoryCache;
 
   constructor(config: ThreadImplConfig) {
     this.id = config.id;
@@ -141,6 +145,7 @@ export class ThreadImpl<TState = Record<string, unknown>>
       // Direct mode - store adapter and state instances
       this._adapter = config.adapter;
       this._stateAdapterInstance = config.stateAdapter;
+      this._messageHistory = config.messageHistory;
     }
 
     if (config.initialMessage) {
@@ -253,10 +258,12 @@ export class ThreadImpl<TState = Record<string, unknown>>
   get messages(): AsyncIterable<Message> {
     const adapter = this.adapter;
     const threadId = this.id;
+    const messageHistory = this._messageHistory;
 
     return {
       async *[Symbol.asyncIterator]() {
         let cursor: string | undefined;
+        let yieldedAny = false;
 
         while (true) {
           const result = await adapter.fetchMessages(threadId, {
@@ -268,6 +275,7 @@ export class ThreadImpl<TState = Record<string, unknown>>
           // but we want newest first, so reverse the page
           const reversed = [...result.messages].reverse();
           for (const message of reversed) {
+            yieldedAny = true;
             yield message;
           }
 
@@ -277,6 +285,15 @@ export class ThreadImpl<TState = Record<string, unknown>>
 
           cursor = result.nextCursor;
         }
+
+        // Fall back to cached history if adapter returned nothing
+        if (!yieldedAny && messageHistory) {
+          const cached = await messageHistory.getMessages(threadId);
+          // Yield newest first
+          for (let i = cached.length - 1; i >= 0; i--) {
+            yield cached[i];
+          }
+        }
       },
     };
   }
@@ -284,10 +301,12 @@ export class ThreadImpl<TState = Record<string, unknown>>
   get allMessages(): AsyncIterable<Message> {
     const adapter = this.adapter;
     const threadId = this.id;
+    const messageHistory = this._messageHistory;
 
     return {
       async *[Symbol.asyncIterator]() {
         let cursor: string | undefined;
+        let yieldedAny = false;
 
         while (true) {
           // Use forward direction to iterate from oldest to newest
@@ -298,6 +317,7 @@ export class ThreadImpl<TState = Record<string, unknown>>
           });
 
           for (const message of result.messages) {
+            yieldedAny = true;
             yield message;
           }
 
@@ -307,6 +327,14 @@ export class ThreadImpl<TState = Record<string, unknown>>
           }
 
           cursor = result.nextCursor;
+        }
+
+        // Fall back to cached history if adapter returned nothing
+        if (!yieldedAny && messageHistory) {
+          const cached = await messageHistory.getMessages(threadId);
+          for (const message of cached) {
+            yield message;
+          }
         }
       },
     };
@@ -361,6 +389,12 @@ export class ThreadImpl<TState = Record<string, unknown>>
       postable,
       rawMessage.threadId
     );
+
+    // Cache sent message for adapters with persistent history
+    if (this._messageHistory) {
+      await this._messageHistory.append(this.id, new Message(result));
+    }
+
     return result;
   }
 
@@ -460,11 +494,17 @@ export class ThreadImpl<TState = Record<string, unknown>>
       };
 
       const raw = await this.adapter.stream(this.id, wrappedStream, options);
-      return this.createSentMessage(
+      const sent = this.createSentMessage(
         raw.id,
         { markdown: accumulated },
         raw.threadId
       );
+
+      if (this._messageHistory) {
+        await this._messageHistory.append(this.id, new Message(sent));
+      }
+
+      return sent;
     }
 
     // Fallback: post + edit with throttling.
@@ -604,16 +644,32 @@ export class ThreadImpl<TState = Record<string, unknown>>
       });
     }
 
-    return this.createSentMessage(
+    const sent = this.createSentMessage(
       msg.id,
       { markdown: accumulated },
       threadIdForEdits
     );
+
+    if (this._messageHistory) {
+      await this._messageHistory.append(this.id, new Message(sent));
+    }
+
+    return sent;
   }
 
   async refresh(): Promise<void> {
     const result = await this.adapter.fetchMessages(this.id, { limit: 50 });
-    this._recentMessages = result.messages;
+    if (result.messages.length > 0) {
+      this._recentMessages = result.messages;
+    } else if (this._messageHistory) {
+      // Fall back to cached history for adapters without native message APIs
+      this._recentMessages = await this._messageHistory.getMessages(
+        this.id,
+        50
+      );
+    } else {
+      this._recentMessages = [];
+    }
   }
 
   mentionUser(userId: string): string {

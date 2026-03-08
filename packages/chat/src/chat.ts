@@ -6,6 +6,7 @@ import {
 } from "./chat-singleton";
 import { isJSX, toModalElement } from "./jsx-runtime";
 import { Message, type SerializedMessage } from "./message";
+import { MessageHistoryCache } from "./message-history";
 import type { ModalElement } from "./modals";
 import { type SerializedThread, ThreadImpl } from "./thread";
 import type {
@@ -22,12 +23,12 @@ import type {
   Channel,
   ChatConfig,
   ChatInstance,
+  DirectMessageHandler,
   EmojiValue,
   Logger,
   LogLevel,
   MemberJoinedChannelEvent,
   MemberJoinedChannelHandler,
-  DirectMessageHandler,
   MentionHandler,
   MessageHandler,
   ModalCloseEvent,
@@ -185,6 +186,7 @@ export class Chat<
   private readonly _streamingUpdateIntervalMs: number;
   private readonly _fallbackStreamingPlaceholderText: string | null;
   private readonly _dedupeTtlMs: number;
+  private readonly _messageHistory: MessageHistoryCache;
 
   private readonly mentionHandlers: MentionHandler<TState>[] = [];
   private readonly directMessageHandlers: DirectMessageHandler<TState>[] = [];
@@ -225,6 +227,10 @@ export class Chat<
         ? config.fallbackStreamingPlaceholderText
         : "...";
     this._dedupeTtlMs = config.dedupeTtlMs ?? DEDUPE_TTL_MS;
+    this._messageHistory = new MessageHistoryCache(
+      this._stateAdapter,
+      config.messageHistory
+    );
 
     // Initialize logger
     if (typeof config.logger === "string") {
@@ -1538,6 +1544,13 @@ export class Chat<
       return;
     }
 
+    // Persist incoming message BEFORE acquiring the lock.
+    // If the lock is already held (e.g., bot is processing a previous message),
+    // we still want to save this message to history so it's not lost.
+    if (adapter.persistMessageHistory) {
+      await this._messageHistory.append(threadId, message);
+    }
+
     // Try to acquire lock on thread
     const lock = await this._stateAdapter.acquireLock(
       threadId,
@@ -1558,7 +1571,7 @@ export class Chat<
       message.isMention =
         message.isMention || this.detectMention(adapter, message);
 
-      // Check if this is a subscribed thread first
+      // Check subscription status (needed for createThread optimization)
       const isSubscribed = await this._stateAdapter.isSubscribed(threadId);
       this.logger.debug("Subscription check", {
         threadId,
@@ -1574,16 +1587,7 @@ export class Chat<
         isSubscribed
       );
 
-      if (isSubscribed) {
-        this.logger.debug("Message in subscribed thread - calling handlers", {
-          threadId,
-          handlerCount: this.subscribedMessageHandlers.length,
-        });
-        await this.runHandlers(this.subscribedMessageHandlers, thread, message);
-        return;
-      }
-
-      // Check for DM - route to direct message handlers if registered
+      // Check for DM first - always route to direct message handlers
       const isDM = adapter.isDM?.(threadId) ?? false;
       if (isDM && this.directMessageHandlers.length > 0) {
         this.logger.debug("Direct message received - calling handlers", {
@@ -1597,6 +1601,16 @@ export class Chat<
       // Backward compat: treat DMs as mentions when no DM handlers registered
       if (isDM) {
         message.isMention = true;
+      }
+
+      // Check subscription (non-DM threads only)
+      if (isSubscribed) {
+        this.logger.debug("Message in subscribed thread - calling handlers", {
+          threadId,
+          handlerCount: this.subscribedMessageHandlers.length,
+        });
+        await this.runHandlers(this.subscribedMessageHandlers, thread, message);
+        return;
       }
 
       // Check for @-mention of bot
@@ -1670,6 +1684,9 @@ export class Chat<
       currentMessage: initialMessage,
       streamingUpdateIntervalMs: this._streamingUpdateIntervalMs,
       fallbackStreamingPlaceholderText: this._fallbackStreamingPlaceholderText,
+      messageHistory: adapter.persistMessageHistory
+        ? this._messageHistory
+        : undefined,
     });
   }
 
