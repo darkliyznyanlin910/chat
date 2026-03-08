@@ -46,13 +46,6 @@ export interface ChatConfig<
    * Pass "silent" to disable all logging.
    */
   logger?: Logger | LogLevel;
-  /** State adapter for subscriptions and locking */
-  state: StateAdapter;
-  /**
-   * Update interval for fallback streaming (post + edit) in milliseconds.
-   * Defaults to 500ms. Lower values provide smoother updates but may hit rate limits.
-   */
-  streamingUpdateIntervalMs?: number;
   /**
    * Behavior when a thread lock cannot be acquired (another handler is processing).
    * - `'drop'` (default) — throw `LockError`, preserving current behavior
@@ -66,6 +59,13 @@ export interface ChatConfig<
         threadId: string,
         message: Message
       ) => "force" | "drop" | Promise<"force" | "drop">);
+  /** State adapter for subscriptions and locking */
+  state: StateAdapter;
+  /**
+   * Update interval for fallback streaming (post + edit) in milliseconds.
+   * Defaults to 500ms. Lower values provide smoother updates but may hit rate limits.
+   */
+  streamingUpdateIntervalMs?: number;
   /** Default bot username across all adapters */
   userName: string;
 }
@@ -479,14 +479,14 @@ export interface StateAdapter {
   /** Extend a lock's TTL */
   extendLock(lock: Lock, ttlMs: number): Promise<boolean>;
 
+  /** Force-release a lock on a thread, regardless of ownership token. Enables interrupt/steerability. */
+  forceReleaseLock(threadId: string): Promise<void>;
+
   /** Get a cached value by key */
   get<T = unknown>(key: string): Promise<T | null>;
 
   /** Check if subscribed to a thread */
   isSubscribed(threadId: string): Promise<boolean>;
-
-  /** Force-release a lock on a thread, regardless of ownership token. Enables interrupt/steerability. */
-  forceReleaseLock(threadId: string): Promise<void>;
 
   /** Release a lock */
   releaseLock(lock: Lock): Promise<void>;

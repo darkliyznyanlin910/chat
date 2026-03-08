@@ -1793,11 +1793,7 @@ describe("Chat", () => {
       const message = createTestMessage("msg-lock-1", "Hey @slack-bot");
 
       await expect(
-        chat.handleIncomingMessage(
-          mockAdapter,
-          "slack:C123:1234.5678",
-          message
-        )
+        chat.handleIncomingMessage(mockAdapter, "slack:C123:1234.5678", message)
       ).rejects.toThrow(LockError);
 
       expect(handler).not.toHaveBeenCalled();
