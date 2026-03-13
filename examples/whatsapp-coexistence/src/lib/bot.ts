@@ -119,6 +119,8 @@ let primaryAdapter: WhatsAppCoexistenceAdapter | undefined;
 let bot: Chat | null = null;
 
 async function initPrimary(): Promise<void> {
+  await state.connect();
+
   const phoneNumbers = await credentialStore.list();
 
   if (phoneNumbers.length === 0) {
