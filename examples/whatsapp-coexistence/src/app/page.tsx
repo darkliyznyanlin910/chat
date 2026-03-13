@@ -71,6 +71,27 @@ export default function SetupPage() {
         Bot + human on the same WhatsApp number using the Vercel Chat SDK.
       </p>
 
+      <div style={{ marginTop: "1.5rem", marginBottom: "1.5rem" }}>
+        <a
+          href="/setup"
+          style={{
+            display: "inline-block",
+            backgroundColor: "#1877f2",
+            color: "#fff",
+            padding: "12px 28px",
+            borderRadius: "6px",
+            fontSize: "16px",
+            fontWeight: "bold",
+            textDecoration: "none",
+          }}
+        >
+          Start Coexistence Setup
+        </a>
+        <span style={{ marginLeft: "12px", fontSize: "14px", color: "#666" }}>
+          Connect your WhatsApp Business account via Embedded Signup
+        </span>
+      </div>
+
       <EnvStatus />
 
       <h2>Endpoints</h2>

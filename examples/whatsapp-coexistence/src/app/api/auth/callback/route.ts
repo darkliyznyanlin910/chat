@@ -10,8 +10,8 @@ import { credentialStore, mode } from "@/lib/bot";
 /**
  * OAuth callback for Embedded Signup.
  *
- * After the business owner scans the QR code in the Embedded Signup flow,
- * Meta redirects here with an authorization code and WABA ID.
+ * Called from the /setup page after the business owner completes the
+ * Embedded Signup flow. Receives an authorization code and WABA ID.
  *
  * This endpoint:
  * 1. Exchanges the code for a short-lived token
