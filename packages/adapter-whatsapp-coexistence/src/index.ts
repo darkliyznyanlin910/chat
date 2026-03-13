@@ -87,6 +87,15 @@ export type {
 } from "./types";
 export { ConversationRouter } from "./routing";
 export {
+  StateCredentialStore,
+  StaticCredentialStore,
+} from "./credential-store";
+export type {
+  CredentialStore,
+  KeyValueStore,
+  PhoneNumberCredentials,
+} from "./credential-store";
+export {
   debugToken,
   exchangeCodeForToken,
   extendToken,
