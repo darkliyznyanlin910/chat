@@ -245,6 +245,40 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
+  examples/whatsapp-coexistence:
+    dependencies:
+      '@chat-adapter/state-memory':
+        specifier: workspace:*
+        version: link:../../packages/state-memory
+      '@chat-adapter/whatsapp-coexistence':
+        specifier: workspace:*
+        version: link:../../packages/adapter-whatsapp-coexistence
+      chat:
+        specifier: workspace:*
+        version: link:../../packages/chat
+      next:
+        specifier: ^16.1.5
+        version: 16.1.5(@opentelemetry/api@1.9.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.3
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.3(react@19.2.3)
+    devDependencies:
+      '@types/node':
+        specifier: ^25.3.2
+        version: 25.3.2
+      '@types/react':
+        specifier: ^19.0.1
+        version: 19.2.7
+      '@types/react-dom':
+        specifier: ^19.0.1
+        version: 19.2.3(@types/react@19.2.7)
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+
   packages/adapter-discord:
     dependencies:
       '@chat-adapter/shared':
