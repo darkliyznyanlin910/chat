@@ -728,6 +728,248 @@ describe("handleWebhook - mixed coexistence payload", () => {
 });
 
 // =============================================================================
+// Per-message filtering (multi-thread payloads)
+// =============================================================================
+
+describe("handleWebhook - per-message filtering", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("should suppress only human-active threads in multi-thread payload", async () => {
+    const adapter = createTestAdapter();
+    await adapter.initialize(mockChat as never);
+
+    // Human takes over thread with customer 15559876543
+    const echoPayload = {
+      object: "whatsapp_business_account",
+      entry: [
+        {
+          id: "waba-123",
+          changes: [
+            {
+              field: "smb_message_echoes",
+              value: {
+                messaging_product: "whatsapp",
+                metadata: {
+                  display_phone_number: "+15551234567",
+                  phone_number_id: "123456789",
+                },
+                message_echoes: [
+                  {
+                    from: "+15551234567",
+                    to: "15559876543",
+                    id: "wamid.echo-multi",
+                    timestamp: "1700000000",
+                    type: "text",
+                    text: { body: "I'll handle this" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    await adapter.handleWebhook(makeSignedRequest(echoPayload));
+
+    // Now receive messages from TWO different customers in one payload
+    const multiPayload = {
+      object: "whatsapp_business_account",
+      entry: [
+        {
+          id: "waba-123",
+          changes: [
+            {
+              field: "messages",
+              value: {
+                messaging_product: "whatsapp",
+                metadata: {
+                  display_phone_number: "+15551234567",
+                  phone_number_id: "123456789",
+                },
+                contacts: [
+                  { profile: { name: "Customer A" }, wa_id: "15559876543" },
+                  { profile: { name: "Customer B" }, wa_id: "15559876999" },
+                ],
+                messages: [
+                  {
+                    id: "wamid.suppressed",
+                    from: "15559876543",
+                    timestamp: "1700000010",
+                    type: "text",
+                    text: { body: "From suppressed thread" },
+                  },
+                  {
+                    id: "wamid.allowed",
+                    from: "15559876999",
+                    timestamp: "1700000010",
+                    type: "text",
+                    text: { body: "From allowed thread" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const response = await adapter.handleWebhook(
+      makeSignedRequest(multiPayload)
+    );
+    expect(response.status).toBe(200);
+
+    // Bot should process because customer B's thread is allowed
+    expect(mockChat.processMessage).toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// waitUntil for async callbacks
+// =============================================================================
+
+describe("handleWebhook - waitUntil for serverless", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("should pipe async echo callback through waitUntil", async () => {
+    let resolveCallback: () => void;
+    const callbackPromise = new Promise<void>((r) => {
+      resolveCallback = r;
+    });
+
+    const onMessageEcho = vi.fn().mockReturnValue(callbackPromise);
+    const adapter = createTestAdapter({ onMessageEcho });
+
+    const waitUntil = vi.fn();
+    const payload = {
+      object: "whatsapp_business_account",
+      entry: [
+        {
+          id: "waba-123",
+          changes: [
+            {
+              field: "smb_message_echoes",
+              value: {
+                messaging_product: "whatsapp",
+                metadata: {
+                  display_phone_number: "+15551234567",
+                  phone_number_id: "123456789",
+                },
+                message_echoes: [
+                  {
+                    from: "+15551234567",
+                    to: "15559876543",
+                    id: "wamid.echo-wu",
+                    timestamp: "1700000000",
+                    type: "text",
+                    text: { body: "Async callback" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const response = await adapter.handleWebhook(makeSignedRequest(payload), {
+      waitUntil,
+    });
+    expect(response.status).toBe(200);
+    expect(waitUntil).toHaveBeenCalledOnce();
+
+    // Resolve the callback promise to avoid hanging
+    resolveCallback!();
+  });
+
+  it("should pipe async contact sync callback through waitUntil", async () => {
+    const onContactSync = vi.fn().mockResolvedValue(undefined);
+    const adapter = createTestAdapter({ onContactSync });
+
+    const waitUntil = vi.fn();
+    const payload = {
+      object: "whatsapp_business_account",
+      entry: [
+        {
+          id: "waba-123",
+          changes: [
+            {
+              field: "smb_app_state_sync",
+              value: {
+                messaging_product: "whatsapp",
+                metadata: {
+                  display_phone_number: "+15551234567",
+                  phone_number_id: "123456789",
+                },
+                contacts: [
+                  { wa_id: "15559876543", profile: { name: "Test" } },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const response = await adapter.handleWebhook(makeSignedRequest(payload), {
+      waitUntil,
+    });
+    expect(response.status).toBe(200);
+    expect(waitUntil).toHaveBeenCalledOnce();
+  });
+});
+
+// =============================================================================
+// Statuses passthrough
+// =============================================================================
+
+describe("handleWebhook - statuses field", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("should pass through statuses-only payload without error", async () => {
+    const adapter = createTestAdapter();
+    await adapter.initialize(mockChat as never);
+
+    const payload = {
+      object: "whatsapp_business_account",
+      entry: [
+        {
+          id: "waba-123",
+          changes: [
+            {
+              field: "statuses",
+              value: {
+                messaging_product: "whatsapp",
+                metadata: {
+                  display_phone_number: "+15551234567",
+                  phone_number_id: "123456789",
+                },
+                statuses: [
+                  {
+                    id: "wamid.status1",
+                    status: "delivered",
+                    timestamp: "1700000000",
+                    recipient_id: "15559876543",
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const response = await adapter.handleWebhook(makeSignedRequest(payload));
+    expect(response.status).toBe(200);
+  });
+});
+
+// =============================================================================
 // Router manual release
 // =============================================================================
 

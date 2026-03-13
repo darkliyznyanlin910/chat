@@ -197,34 +197,55 @@ export class WhatsAppCoexistenceAdapter
       return new Response("Invalid JSON", { status: 400 });
     }
 
-    let hasStandardMessages = false;
+    // Collect async callback promises to pipe through waitUntil
+    const asyncWork: Promise<void>[] = [];
 
+    // Process coexistence-specific events first (echoes update routing state
+    // before we check which messages to suppress)
     for (const entry of payload.entry) {
       for (const change of entry.changes) {
         if (change.field === "smb_message_echoes") {
-          this.handleEchoChange(change.value as WhatsAppEchoWebhookValue);
+          this.handleEchoChange(
+            change.value as WhatsAppEchoWebhookValue,
+            asyncWork
+          );
         } else if (change.field === "smb_app_state_sync") {
-          this.handleStateSyncChange(change.value as WhatsAppStateSyncValue);
-        } else if (change.field === "messages") {
-          hasStandardMessages = true;
+          this.handleStateSyncChange(
+            change.value as WhatsAppStateSyncValue,
+            asyncWork
+          );
         }
       }
     }
 
-    // If there are standard messages, check routing before delegating
-    if (hasStandardMessages) {
-      const shouldProcess = await this.shouldProcessMessages(payload);
-      if (shouldProcess) {
-        // Reconstruct the request for the base adapter (body already consumed)
-        const forwardRequest = new Request(request.url, {
-          method: "POST",
-          headers: request.headers,
-          body,
-        });
-        return this.inner.handleWebhook(forwardRequest, options);
+    // Filter the payload per-message: remove suppressed threads, keep the rest
+    const filteredPayload = await this.filterPayloadByRouting(payload);
+
+    if (filteredPayload) {
+      // Build a synthetic request with the filtered payload.
+      // Use x-hub-signature-pre-verified header so the base adapter
+      // can skip re-verification (the body has changed due to filtering).
+      const forwardBody = JSON.stringify(filteredPayload);
+      const forwardRequest = new Request(request.url, {
+        method: "POST",
+        headers: request.headers,
+        body: forwardBody,
+      });
+      // Re-sign with the filtered body so the base adapter's signature check passes
+      const newSignature = `sha256=${createHmac("sha256", this.appSecret).update(forwardBody).digest("hex")}`;
+      forwardRequest.headers.set("x-hub-signature-256", newSignature);
+
+      // Pipe any async callback work through waitUntil before delegating
+      if (asyncWork.length > 0 && options?.waitUntil) {
+        options.waitUntil(Promise.allSettled(asyncWork).then(() => {}));
       }
-      // Human is active — acknowledge but don't process
-      this.logger.debug("Suppressing bot processing — human is active on Business App");
+
+      return this.inner.handleWebhook(forwardRequest, options);
+    }
+
+    // No messages to forward — pipe async work and return 200
+    if (asyncWork.length > 0 && options?.waitUntil) {
+      options.waitUntil(Promise.allSettled(asyncWork).then(() => {}));
     }
 
     return new Response("ok", { status: 200 });
@@ -391,7 +412,10 @@ export class WhatsAppCoexistenceAdapter
   /**
    * Handle the smb_message_echoes webhook change.
    */
-  private handleEchoChange(value: WhatsAppEchoWebhookValue): void {
+  private handleEchoChange(
+    value: WhatsAppEchoWebhookValue,
+    asyncWork: Promise<void>[]
+  ): void {
     const phoneNumberId = value.metadata.phone_number_id;
 
     for (const echo of value.message_echoes) {
@@ -419,9 +443,11 @@ export class WhatsAppCoexistenceAdapter
         try {
           const result = this.onMessageEcho(event);
           if (result instanceof Promise) {
-            result.catch((error) => {
-              this.logger.error("onMessageEcho handler failed", { error });
-            });
+            asyncWork.push(
+              result.catch((error) => {
+                this.logger.error("onMessageEcho handler failed", { error });
+              })
+            );
           }
         } catch (error) {
           this.logger.error("onMessageEcho handler failed", { error });
@@ -433,7 +459,10 @@ export class WhatsAppCoexistenceAdapter
   /**
    * Handle the smb_app_state_sync webhook change.
    */
-  private handleStateSyncChange(value: WhatsAppStateSyncValue): void {
+  private handleStateSyncChange(
+    value: WhatsAppStateSyncValue,
+    asyncWork: Promise<void>[]
+  ): void {
     if (!this.onContactSync) {
       return;
     }
@@ -446,9 +475,11 @@ export class WhatsAppCoexistenceAdapter
     try {
       const result = this.onContactSync(event);
       if (result instanceof Promise) {
-        result.catch((error) => {
-          this.logger.error("onContactSync handler failed", { error });
-        });
+        asyncWork.push(
+          result.catch((error) => {
+            this.logger.error("onContactSync handler failed", { error });
+          })
+        );
       }
     } catch (error) {
       this.logger.error("onContactSync handler failed", { error });
@@ -456,37 +487,53 @@ export class WhatsAppCoexistenceAdapter
   }
 
   /**
-   * Determine whether the bot should process incoming customer messages.
+   * Filter the webhook payload per-message, removing messages on threads
+   * where the human is active. Returns the filtered payload, or null
+   * if no messages remain to process.
    *
-   * Checks each message's thread against the routing logic:
-   * - If a custom `shouldBotRespond` function is provided, calls it
-   * - Otherwise, checks if the human replied recently via the router
-   *
-   * Returns true if any message should be processed.
+   * This solves the multi-thread problem: a single webhook can contain
+   * messages from multiple customers. Some threads may have a human active
+   * while others don't — we only suppress the threads that need it.
    */
-  private async shouldProcessMessages(
+  private async filterPayloadByRouting(
     payload: CoexistenceWebhookPayload
-  ): Promise<boolean> {
+  ): Promise<CoexistenceWebhookPayload | null> {
+    let hasMessages = false;
+
+    const filteredEntries = [];
+
     for (const entry of payload.entry) {
+      const filteredChanges = [];
+
       for (const change of entry.changes) {
+        // Pass through non-message changes (statuses, etc.) as-is
         if (change.field !== "messages") {
+          filteredChanges.push(change);
           continue;
         }
 
         const value = change.value as {
           metadata: { phone_number_id: string };
           messages?: Array<{ from: string }>;
+          contacts?: unknown[];
+          statuses?: unknown[];
         };
 
-        if (!value.messages) {
+        if (!value.messages || value.messages.length === 0) {
+          // No messages — still pass through (might have statuses/contacts)
+          filteredChanges.push(change);
           continue;
         }
+
+        const allowedMessages = [];
 
         for (const msg of value.messages) {
           const threadId = this.encodeThreadId({
             phoneNumberId: value.metadata.phone_number_id,
             userWaId: msg.from,
           });
+
+          let allow: boolean;
 
           if (this.shouldBotRespond) {
             const context: RoutingContext = {
@@ -496,22 +543,47 @@ export class WhatsAppCoexistenceAdapter
               lastHumanReplyAt: this.router.getLastHumanReplyAt(threadId),
               msSinceHumanReply: this.router.getMsSinceHumanReply(threadId),
             };
-
-            const result = await this.shouldBotRespond(context);
-            if (result) {
-              return true;
-            }
+            allow = await this.shouldBotRespond(context);
           } else {
-            // Default: process if the human is NOT active
-            if (!this.router.isHumanActive(threadId)) {
-              return true;
-            }
+            allow = !this.router.isHumanActive(threadId);
+          }
+
+          if (allow) {
+            allowedMessages.push(msg);
+          } else {
+            this.logger.debug(
+              "Suppressing message — human is active on thread",
+              { threadId }
+            );
           }
         }
+
+        if (allowedMessages.length > 0) {
+          hasMessages = true;
+          filteredChanges.push({
+            ...change,
+            value: { ...value, messages: allowedMessages },
+          });
+        } else if (value.statuses || value.contacts) {
+          // Keep the change for statuses/contacts even if all messages filtered
+          filteredChanges.push({
+            ...change,
+            value: { ...value, messages: [] },
+          });
+        }
+        // else: all messages suppressed, no statuses/contacts — drop the change
+      }
+
+      if (filteredChanges.length > 0) {
+        filteredEntries.push({ ...entry, changes: filteredChanges });
       }
     }
 
-    return false;
+    if (!hasMessages) {
+      return null;
+    }
+
+    return { ...payload, entry: filteredEntries };
   }
 
   /**

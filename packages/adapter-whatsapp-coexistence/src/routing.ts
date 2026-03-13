@@ -111,8 +111,12 @@ export class ConversationRouter {
     }, 5 * 60 * 1000);
 
     // Don't keep the process alive for cleanup
-    if (this.cleanupInterval && typeof this.cleanupInterval === "object" && "unref" in this.cleanupInterval) {
-      this.cleanupInterval.unref();
+    if (this.cleanupInterval) {
+      try {
+        (this.cleanupInterval as { unref?: () => void }).unref?.();
+      } catch {
+        // unref() not available in this runtime (e.g. Edge Runtime)
+      }
     }
   }
 }

@@ -229,7 +229,7 @@ export interface WhatsAppStateSyncChange {
  * smb_message_echoes, and smb_app_state_sync fields.
  */
 export interface CoexistenceWebhookChange {
-  field: "messages" | "smb_message_echoes" | "smb_app_state_sync";
+  field: "messages" | "smb_message_echoes" | "smb_app_state_sync" | "statuses";
   value: unknown;
 }
 
