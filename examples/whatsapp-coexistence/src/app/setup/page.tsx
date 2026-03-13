@@ -23,8 +23,14 @@ export default function SetupPage() {
   const [result, setResult] = useState<CallbackResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [sdkReady, setSdkReady] = useState(false);
+  const [origin, setOrigin] = useState("");
   const initRef = useRef(false);
   const wabaIdRef = useRef<string | null>(null);
+
+  // Set origin on mount (avoids hydration mismatch)
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
 
   // Fetch app ID from server
   useEffect(() => {
@@ -285,7 +291,7 @@ export default function SetupPage() {
           <li>
             Configure your webhook URL in the Meta App Dashboard:
             <br />
-            <code style={{ fontSize: "13px" }}>{typeof window !== "undefined" ? window.location.origin : ""}/api/webhooks/whatsapp</code>
+            <code style={{ fontSize: "13px" }}>{origin}/api/webhooks/whatsapp</code>
           </li>
           <li>
             Use the verify token from your <code>WHATSAPP_VERIFY_TOKEN</code> env var
@@ -296,7 +302,7 @@ export default function SetupPage() {
           <li>
             Set the partner webhook for history sync:
             <br />
-            <code style={{ fontSize: "13px" }}>{typeof window !== "undefined" ? window.location.origin : ""}/api/partner-webhook</code>
+            <code style={{ fontSize: "13px" }}>{origin}/api/partner-webhook</code>
           </li>
         </ol>
       </section>
