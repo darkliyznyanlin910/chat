@@ -86,6 +86,23 @@ export type {
   WhatsAppMessageEcho,
 } from "./types";
 export { ConversationRouter } from "./routing";
+export {
+  debugToken,
+  exchangeCodeForToken,
+  extendToken,
+  fetchWABAInfo,
+  generateVerifyToken,
+  loadCredentialsFromEnv,
+  subscribeToWebhooks,
+  validateEnv,
+} from "./auth";
+export type {
+  AppCredentials,
+  PhoneNumberInfo,
+  TokenDebugResult,
+  TokenExchangeResult,
+  WABAInfo,
+} from "./auth";
 
 /**
  * WhatsApp Coexistence adapter for chat SDK.
