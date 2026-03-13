@@ -6,10 +6,13 @@
  * 2. Multi-number mode stores and retrieves (StateCredentialStore)
  * 3. Webhook routes to correct adapter by phone_number_id
  * 4. OAuth callback persists credentials to state adapter
+ *
+ * Note: verifyToken is shared across all numbers (set once in Meta's webhook
+ * config), so it lives in env/adapter config — not in PhoneNumberCredentials.
  */
 
 import { createHmac } from "node:crypto";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createWhatsAppCoexistenceAdapter,
   StateCredentialStore,
@@ -17,12 +20,14 @@ import {
   WhatsAppCoexistenceAdapter,
 } from "./index";
 import type {
-  CredentialStore,
   KeyValueStore,
   PhoneNumberCredentials,
 } from "./credential-store";
 
 // ── Helpers ─────────────────────────────────────────────────────────
+
+/** Shared verify token — same for all numbers, from env in production */
+const SHARED_VERIFY_TOKEN = "shared-verify-token";
 
 function createMockKVStore(): KeyValueStore & { _data: Map<string, unknown> } {
   const data = new Map<string, unknown>();
@@ -84,7 +89,7 @@ function createAdapterForCreds(
     accessToken: creds.accessToken,
     appSecret: "test-secret",
     phoneNumberId: creds.phoneNumberId,
-    verifyToken: creds.verifyToken,
+    verifyToken: SHARED_VERIFY_TOKEN,
     logger: mockLogger,
   });
 }
@@ -98,7 +103,6 @@ describe("single-number mode with StaticCredentialStore", () => {
     const store = new StaticCredentialStore({
       accessToken: "token-A",
       phoneNumberId: "111",
-      verifyToken: "verify-A",
     });
 
     const creds = await store.get("111");
@@ -115,7 +119,6 @@ describe("single-number mode with StaticCredentialStore", () => {
     const store = new StaticCredentialStore({
       accessToken: "token-A",
       phoneNumberId: "111",
-      verifyToken: "verify-A",
     });
 
     expect(await store.get("999")).toBeNull();
@@ -125,16 +128,15 @@ describe("single-number mode with StaticCredentialStore", () => {
     const store = new StaticCredentialStore({
       accessToken: "token-A",
       phoneNumberId: "111",
-      verifyToken: "verify-A",
     });
 
     const creds = await store.get("111");
     const adapter = createAdapterForCreds(creds!);
     await adapter.initialize(mockChat as never);
 
-    // Verify GET challenge works
+    // Verify GET challenge works (verify token comes from shared config, not credentials)
     const url =
-      "https://example.com/webhook?hub.mode=subscribe&hub.verify_token=verify-A&hub.challenge=test123";
+      `https://example.com/webhook?hub.mode=subscribe&hub.verify_token=${SHARED_VERIFY_TOKEN}&hub.challenge=test123`;
     const response = await adapter.handleWebhook(
       new Request(url, { method: "GET" })
     );
@@ -154,7 +156,6 @@ describe("multi-number mode with StateCredentialStore", () => {
     await store.set("111", {
       accessToken: "token-A",
       phoneNumberId: "111",
-      verifyToken: "verify-A",
       displayPhoneNumber: "+1 555 111 1111",
       wabaId: "waba-1",
     });
@@ -162,7 +163,6 @@ describe("multi-number mode with StateCredentialStore", () => {
     await store.set("222", {
       accessToken: "token-B",
       phoneNumberId: "222",
-      verifyToken: "verify-B",
       displayPhoneNumber: "+1 555 222 2222",
       wabaId: "waba-1",
     });
@@ -186,12 +186,10 @@ describe("multi-number mode with StateCredentialStore", () => {
     await store.set("111", {
       accessToken: "token-A",
       phoneNumberId: "111",
-      verifyToken: "verify-A",
     });
     await store.set("222", {
       accessToken: "token-B",
       phoneNumberId: "222",
-      verifyToken: "verify-B",
     });
 
     const credsA = await store.get("111");
@@ -225,14 +223,12 @@ describe("multi-number mode with StateCredentialStore", () => {
     await store.set("111", {
       accessToken: "old-token",
       phoneNumberId: "111",
-      verifyToken: "verify-A",
     });
 
     // Update with new token (e.g., after token refresh)
     await store.set("111", {
       accessToken: "new-token",
       phoneNumberId: "111",
-      verifyToken: "verify-A",
       tokenExpiresAt: Math.floor(Date.now() / 1000) + 86400 * 60,
     });
 
@@ -248,12 +244,10 @@ describe("multi-number mode with StateCredentialStore", () => {
     await store.set("111", {
       accessToken: "token-A",
       phoneNumberId: "111",
-      verifyToken: "verify-A",
     });
     await store.set("222", {
       accessToken: "token-B",
       phoneNumberId: "222",
-      verifyToken: "verify-B",
     });
 
     await store.delete("111");
@@ -279,12 +273,10 @@ describe("webhook routing by phone_number_id", () => {
     await store.set("111", {
       accessToken: "token-A",
       phoneNumberId: "111",
-      verifyToken: "verify-A",
     });
     await store.set("222", {
       accessToken: "token-B",
       phoneNumberId: "222",
-      verifyToken: "verify-B",
     });
 
     // Simulate multi-number routing: extract phone_number_id from payload,
@@ -349,7 +341,6 @@ describe("webhook routing by phone_number_id", () => {
     await store.set("111", {
       accessToken: "token-A",
       phoneNumberId: "111",
-      verifyToken: "verify-A",
     });
 
     // Webhook for unregistered number
@@ -358,58 +349,52 @@ describe("webhook routing by phone_number_id", () => {
     // In the real webhook route, this returns 404
   });
 
-  it("should verify GET challenge with matching verify token", async () => {
+  it("should verify GET challenge with shared verify token", async () => {
+    // Verify token is shared — set once in Meta's webhook config,
+    // applied to all adapters from env (WHATSAPP_VERIFY_TOKEN)
     const store = new StateCredentialStore(createMockKVStore());
 
     await store.set("111", {
       accessToken: "token-A",
       phoneNumberId: "111",
-      verifyToken: "secret-verify-111",
     });
     await store.set("222", {
       accessToken: "token-B",
       phoneNumberId: "222",
-      verifyToken: "secret-verify-222",
     });
 
-    // Simulate multi-number GET verification: check all registered tokens
-    const hubToken = "secret-verify-222";
-    const numbers = await store.list();
+    // All adapters use the same shared verify token
+    const creds = await store.get("111");
+    const adapter = createAdapterForCreds(creds!);
+    await adapter.initialize(mockChat as never);
 
-    let matched = false;
-    for (const id of numbers) {
-      const creds = await store.get(id);
-      if (creds?.verifyToken === hubToken) {
-        matched = true;
-        break;
-      }
-    }
-
-    expect(matched).toBe(true);
+    const url =
+      `https://example.com/webhook?hub.mode=subscribe&hub.verify_token=${SHARED_VERIFY_TOKEN}&hub.challenge=challenge123`;
+    const response = await adapter.handleWebhook(
+      new Request(url, { method: "GET" })
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("challenge123");
   });
 
-  it("should reject GET challenge with unknown verify token", async () => {
+  it("should reject GET challenge with wrong verify token", async () => {
     const store = new StateCredentialStore(createMockKVStore());
 
     await store.set("111", {
       accessToken: "token-A",
       phoneNumberId: "111",
-      verifyToken: "secret-verify-111",
     });
 
-    const hubToken = "wrong-token";
-    const numbers = await store.list();
+    const creds = await store.get("111");
+    const adapter = createAdapterForCreds(creds!);
+    await adapter.initialize(mockChat as never);
 
-    let matched = false;
-    for (const id of numbers) {
-      const creds = await store.get(id);
-      if (creds?.verifyToken === hubToken) {
-        matched = true;
-        break;
-      }
-    }
-
-    expect(matched).toBe(false);
+    const url =
+      "https://example.com/webhook?hub.mode=subscribe&hub.verify_token=wrong-token&hub.challenge=challenge123";
+    const response = await adapter.handleWebhook(
+      new Request(url, { method: "GET" })
+    );
+    expect(response.status).toBe(403);
   });
 });
 
@@ -422,6 +407,7 @@ describe("OAuth callback credential persistence", () => {
     const store = new StateCredentialStore(createMockKVStore());
 
     // Simulate what the OAuth callback does after token exchange
+    // Note: verifyToken is NOT stored per-number — it's shared from env
     const signupResult = {
       accessToken: "EAAlong-lived-token-abc",
       expiresIn: 5184000, // 60 days
@@ -430,7 +416,6 @@ describe("OAuth callback credential persistence", () => {
         { id: "222", display_phone_number: "+1 555 222 2222", verified_name: "My Business" },
       ],
       wabaId: "waba-123",
-      verifyToken: "generated-verify-token",
     };
 
     const tokenExpiresAt = Math.floor(Date.now() / 1000) + signupResult.expiresIn;
@@ -440,7 +425,6 @@ describe("OAuth callback credential persistence", () => {
       await store.set(phone.id, {
         accessToken: signupResult.accessToken,
         phoneNumberId: phone.id,
-        verifyToken: signupResult.verifyToken,
         displayPhoneNumber: phone.display_phone_number,
         wabaId: signupResult.wabaId,
         tokenExpiresAt,
@@ -456,7 +440,6 @@ describe("OAuth callback credential persistence", () => {
     expect(creds1).toEqual({
       accessToken: "EAAlong-lived-token-abc",
       phoneNumberId: "111",
-      verifyToken: "generated-verify-token",
       displayPhoneNumber: "+1 555 111 1111",
       wabaId: "waba-123",
       tokenExpiresAt,
@@ -482,7 +465,6 @@ describe("OAuth callback credential persistence", () => {
     await store.set("111", {
       accessToken: "old-token",
       phoneNumberId: "111",
-      verifyToken: "verify-A",
       tokenExpiresAt: Math.floor(Date.now() / 1000) + 86400 * 7, // 7 days left
     });
 
@@ -499,7 +481,7 @@ describe("OAuth callback credential persistence", () => {
     const updated = await store.get("111");
     expect(updated!.accessToken).toBe("refreshed-token");
     expect(updated!.tokenExpiresAt).toBe(newExpiry);
-    expect(updated!.verifyToken).toBe("verify-A"); // unchanged
+    expect(updated!.phoneNumberId).toBe("111"); // unchanged
 
     // Still only one entry
     expect(await store.list()).toEqual(["111"]);
@@ -511,12 +493,10 @@ describe("OAuth callback credential persistence", () => {
     await store.set("111", {
       accessToken: "token-A",
       phoneNumberId: "111",
-      verifyToken: "verify-A",
     });
     await store.set("222", {
       accessToken: "token-B",
       phoneNumberId: "222",
-      verifyToken: "verify-B",
     });
 
     // Deregister number 111

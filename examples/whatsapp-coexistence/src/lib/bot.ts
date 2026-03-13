@@ -38,24 +38,21 @@ function createCredentialStore(
   // Single-number mode: read from env vars
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-  const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
 
-  if (!accessToken || !phoneNumberId || !verifyToken) {
+  if (!accessToken || !phoneNumberId) {
     console.warn(
-      "[bot] Single-number mode requires WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_VERIFY_TOKEN"
+      "[bot] Single-number mode requires WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID"
     );
     // Return an empty static store — adapter won't be created
     return new StaticCredentialStore({
       accessToken: "",
       phoneNumberId: "",
-      verifyToken: "",
     });
   }
 
   return new StaticCredentialStore({
     accessToken,
     phoneNumberId,
-    verifyToken,
   });
 }
 
@@ -83,15 +80,19 @@ function createAdapterFromCredentials(
   creds: PhoneNumberCredentials
 ): WhatsAppCoexistenceAdapter {
   const appSecret = process.env.WHATSAPP_APP_SECRET;
+  const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
   if (!appSecret) {
     throw new Error("WHATSAPP_APP_SECRET is required in both modes");
+  }
+  if (!verifyToken) {
+    throw new Error("WHATSAPP_VERIFY_TOKEN is required in both modes");
   }
 
   const adapter = createWhatsAppCoexistenceAdapter({
     accessToken: creds.accessToken,
     appSecret,
     phoneNumberId: creds.phoneNumberId,
-    verifyToken: creds.verifyToken,
+    verifyToken,
     logger: logger.child(`whatsapp:${creds.phoneNumberId}`),
     humanTakeoverTtlMs: 30 * 60 * 1000,
 

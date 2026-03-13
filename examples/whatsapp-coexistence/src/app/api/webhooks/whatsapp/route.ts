@@ -1,5 +1,5 @@
 import { after } from "next/server";
-import { bot, getAdapter, mode, credentialStore } from "@/lib/bot";
+import { bot, getAdapter, mode } from "@/lib/bot";
 
 /**
  * GET — webhook verification challenge.
@@ -12,7 +12,7 @@ export async function GET(request: Request): Promise<Response> {
     return bot.webhooks.whatsapp(request);
   }
 
-  // Multi-number: verify token could belong to any registered number
+  // Multi-number: verify token is shared across all numbers (from env)
   const url = new URL(request.url);
   const hubMode = url.searchParams.get("hub.mode");
   const hubToken = url.searchParams.get("hub.verify_token");
@@ -22,13 +22,9 @@ export async function GET(request: Request): Promise<Response> {
     return new Response("Missing verification parameters", { status: 400 });
   }
 
-  // Check all registered numbers for a matching verify token
-  const phoneNumbers = await credentialStore.list();
-  for (const phoneNumberId of phoneNumbers) {
-    const creds = await credentialStore.get(phoneNumberId);
-    if (creds?.verifyToken === hubToken) {
-      return new Response(hubChallenge, { status: 200 });
-    }
+  const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
+  if (hubToken === verifyToken) {
+    return new Response(hubChallenge, { status: 200 });
   }
 
   return new Response("Invalid verify token", { status: 403 });

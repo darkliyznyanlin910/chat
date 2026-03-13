@@ -4,7 +4,6 @@ import {
   fetchWABAInfo,
   loadCredentialsFromEnv,
   subscribeToWebhooks,
-  generateVerifyToken,
 } from "@chat-adapter/whatsapp-coexistence";
 import { credentialStore, mode } from "@/lib/bot";
 
@@ -69,7 +68,8 @@ export async function GET(request: Request): Promise<Response> {
     console.log("[auth] Subscribed to webhooks");
 
     // Step 5: Store credentials for each phone number
-    const verifyToken = generateVerifyToken();
+    // Note: verifyToken is shared across all numbers (from WHATSAPP_VERIFY_TOKEN env var),
+    // so it is NOT stored per-number in the credential store.
     const tokenExpiresAt = expiresIn
       ? Math.floor(Date.now() / 1000) + expiresIn
       : 0;
@@ -78,7 +78,6 @@ export async function GET(request: Request): Promise<Response> {
       await credentialStore.set(phone.id, {
         accessToken,
         phoneNumberId: phone.id,
-        verifyToken,
         displayPhoneNumber: phone.displayNumber,
         wabaId,
         tokenExpiresAt,
@@ -90,7 +89,6 @@ export async function GET(request: Request): Promise<Response> {
       success: true,
       mode,
       phoneNumbers,
-      verifyToken,
       expiresInDays: Math.round((expiresIn ?? 0) / 86400),
     };
 
@@ -100,7 +98,6 @@ export async function GET(request: Request): Promise<Response> {
       response.envVars = {
         WHATSAPP_ACCESS_TOKEN: `${accessToken.slice(0, 10)}...`,
         WHATSAPP_PHONE_NUMBER_ID: phoneNumbers[0]?.id,
-        WHATSAPP_VERIFY_TOKEN: verifyToken,
       };
     } else {
       response.message = `Credentials stored for ${phoneNumbers.length} phone number(s). The adapter will pick them up automatically.`;

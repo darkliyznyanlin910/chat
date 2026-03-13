@@ -31,8 +31,6 @@ export interface PhoneNumberCredentials {
   accessToken: string;
   /** Phone number ID from WABA */
   phoneNumberId: string;
-  /** Webhook verification token */
-  verifyToken: string;
   /** Human-readable phone number (e.g. "+1 555 123 4567") */
   displayPhoneNumber?: string;
   /** WhatsApp Business Account ID */
@@ -83,7 +81,6 @@ export interface CredentialStore {
  * await store.set("123456789", {
  *   accessToken: "EAA...",
  *   phoneNumberId: "123456789",
- *   verifyToken: "my-verify-token",
  * });
  *
  * // Retrieve later
@@ -151,7 +148,6 @@ export class StateCredentialStore implements CredentialStore {
  * const store = new StaticCredentialStore({
  *   accessToken: process.env.WHATSAPP_ACCESS_TOKEN!,
  *   phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID!,
- *   verifyToken: process.env.WHATSAPP_VERIFY_TOKEN!,
  * });
  * ```
  */

@@ -25,7 +25,6 @@ function createMockStore() {
 const testCreds: PhoneNumberCredentials = {
   accessToken: "EAAtest123",
   phoneNumberId: "111222333",
-  verifyToken: "verify-abc",
   displayPhoneNumber: "+1 555 000 1111",
   wabaId: "waba-456",
 };
@@ -33,7 +32,6 @@ const testCreds: PhoneNumberCredentials = {
 const testCreds2: PhoneNumberCredentials = {
   accessToken: "EAAtest456",
   phoneNumberId: "444555666",
-  verifyToken: "verify-def",
 };
 
 // =============================================================================
