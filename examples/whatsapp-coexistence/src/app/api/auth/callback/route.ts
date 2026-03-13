@@ -4,7 +4,9 @@ import {
   fetchWABAInfo,
   loadCredentialsFromEnv,
   subscribeToWebhooks,
+  generateVerifyToken,
 } from "@chat-adapter/whatsapp-coexistence";
+import { credentialStore, mode } from "@/lib/bot";
 
 /**
  * OAuth callback for Embedded Signup.
@@ -17,7 +19,7 @@ import {
  * 2. Extends it to a long-lived token (60 days)
  * 3. Discovers phone number IDs from the WABA
  * 4. Subscribes the WABA to webhooks
- * 5. Returns the credentials to store securely
+ * 5. Stores credentials in the credential store
  */
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -49,7 +51,9 @@ export async function GET(request: Request): Promise<Response> {
       shortLived,
       credentials
     );
-    console.log(`[auth] Extended to long-lived token (expires in ${expiresIn}s)`);
+    console.log(
+      `[auth] Extended to long-lived token (expires in ${expiresIn}s)`
+    );
 
     // Step 3: Discover phone numbers
     const waba = await fetchWABAInfo(wabaId, accessToken);
@@ -64,23 +68,46 @@ export async function GET(request: Request): Promise<Response> {
     await subscribeToWebhooks(wabaId, accessToken);
     console.log("[auth] Subscribed to webhooks");
 
-    // Return credentials (in production, store these securely!)
-    return Response.json({
-      success: true,
-      message:
-        "Coexistence setup complete! Store these credentials securely.",
-      credentials: {
-        accessToken: `${accessToken.slice(0, 10)}...${accessToken.slice(-5)}`,
-        expiresInDays: Math.round((expiresIn ?? 0) / 86400),
-        phoneNumbers,
+    // Step 5: Store credentials for each phone number
+    const verifyToken = generateVerifyToken();
+    const tokenExpiresAt = expiresIn
+      ? Math.floor(Date.now() / 1000) + expiresIn
+      : 0;
+
+    for (const phone of phoneNumbers) {
+      await credentialStore.set(phone.id, {
+        accessToken,
+        phoneNumberId: phone.id,
+        verifyToken,
+        displayPhoneNumber: phone.displayNumber,
         wabaId,
-      },
-      nextSteps: [
-        "Set WHATSAPP_ACCESS_TOKEN in your environment",
-        `Set WHATSAPP_PHONE_NUMBER_ID to ${phoneNumbers[0]?.id ?? "your-phone-number-id"}`,
-        "Restart the application",
-      ],
-    });
+        tokenExpiresAt,
+      });
+      console.log(`[auth] Stored credentials for phone ${phone.id}`);
+    }
+
+    const response: Record<string, unknown> = {
+      success: true,
+      mode,
+      phoneNumbers,
+      verifyToken,
+      expiresInDays: Math.round((expiresIn ?? 0) / 86400),
+    };
+
+    if (mode === "single") {
+      response.message =
+        "Credentials obtained. Set these environment variables and restart:";
+      response.envVars = {
+        WHATSAPP_ACCESS_TOKEN: `${accessToken.slice(0, 10)}...`,
+        WHATSAPP_PHONE_NUMBER_ID: phoneNumbers[0]?.id,
+        WHATSAPP_VERIFY_TOKEN: verifyToken,
+      };
+    } else {
+      response.message = `Credentials stored for ${phoneNumbers.length} phone number(s). The adapter will pick them up automatically.`;
+      response.registeredNumbers = await credentialStore.list();
+    }
+
+    return Response.json(response);
   } catch (err) {
     console.error("[auth] Signup callback error:", err);
     return Response.json(

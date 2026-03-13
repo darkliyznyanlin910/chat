@@ -2,57 +2,95 @@ import {
   debugToken,
   loadCredentialsFromEnv,
 } from "@chat-adapter/whatsapp-coexistence";
-import { adapter } from "@/lib/bot";
+import { credentialStore, mode } from "@/lib/bot";
 
 /**
  * Health check endpoint.
  *
  * Returns the status of:
- * - Adapter configuration
- * - Access token validity and expiry
- * - Router state (active human threads)
+ * - Mode (single/multi)
+ * - Registered phone numbers and their token validity
  */
 export async function GET(): Promise<Response> {
   const checks: Record<string, unknown> = {
     timestamp: new Date().toISOString(),
-    adapter: adapter ? "configured" : "not configured",
+    mode,
   };
 
-  if (!adapter) {
-    return Response.json({ ...checks, healthy: false }, { status: 503 });
+  const phoneNumbers = await credentialStore.list();
+  checks.registeredNumbers = phoneNumbers.length;
+
+  if (phoneNumbers.length === 0) {
+    return Response.json(
+      { ...checks, healthy: false, error: "No phone numbers registered" },
+      { status: 503 }
+    );
   }
 
-  // Check token health
+  // Check token health for each registered number
+  let credentials: { appId: string; appSecret: string } | null = null;
   try {
-    const credentials = loadCredentialsFromEnv();
-    const token = process.env.WHATSAPP_ACCESS_TOKEN;
-
-    if (token) {
-      const debug = await debugToken(token, credentials);
-      checks.token = {
-        valid: debug.isValid,
-        scopes: debug.scopes,
-        expiresAt: debug.expiresAt > 0
-          ? new Date(debug.expiresAt * 1000).toISOString()
-          : "never (system user token)",
-        ...(debug.expiresAt > 0 && {
-          daysRemaining: Math.round(
-            (debug.expiresAt * 1000 - Date.now()) / 86400000
-          ),
-        }),
-        ...(debug.error && { error: debug.error.message }),
-      };
-    }
-  } catch (err) {
-    checks.token = {
-      valid: false,
-      error: err instanceof Error ? err.message : "Check failed",
-    };
+    credentials = loadCredentialsFromEnv();
+  } catch {
+    // App credentials not configured — skip token debug
   }
 
-  const healthy =
-    checks.adapter === "configured" &&
-    (checks.token as Record<string, unknown>)?.valid !== false;
+  const numberStatuses = [];
+  let allHealthy = true;
 
-  return Response.json({ ...checks, healthy }, { status: healthy ? 200 : 503 });
+  for (const phoneNumberId of phoneNumbers) {
+    const creds = await credentialStore.get(phoneNumberId);
+    if (!creds) {
+      numberStatuses.push({ phoneNumberId, status: "missing credentials" });
+      allHealthy = false;
+      continue;
+    }
+
+    const entry: Record<string, unknown> = {
+      phoneNumberId,
+      displayPhoneNumber: creds.displayPhoneNumber ?? "unknown",
+    };
+
+    if (credentials && creds.accessToken) {
+      try {
+        const debug = await debugToken(creds.accessToken, credentials);
+        entry.tokenValid = debug.isValid;
+        entry.scopes = debug.scopes;
+
+        if (debug.expiresAt > 0) {
+          const daysLeft = Math.round(
+            (debug.expiresAt * 1000 - Date.now()) / 86400000
+          );
+          entry.tokenExpiresAt = new Date(
+            debug.expiresAt * 1000
+          ).toISOString();
+          entry.daysRemaining = daysLeft;
+
+          if (daysLeft < 7) {
+            entry.warning = "Token expires soon — refresh recommended";
+          }
+        } else {
+          entry.tokenExpiry = "never (system user token)";
+        }
+
+        if (!debug.isValid) {
+          allHealthy = false;
+          entry.error = debug.error?.message;
+        }
+      } catch (err) {
+        entry.tokenValid = false;
+        entry.error = err instanceof Error ? err.message : "Check failed";
+        allHealthy = false;
+      }
+    } else {
+      entry.tokenValid = "unknown (app credentials not configured for debug)";
+    }
+
+    numberStatuses.push(entry);
+  }
+
+  checks.numbers = numberStatuses;
+  checks.healthy = allHealthy;
+
+  return Response.json(checks, { status: allHealthy ? 200 : 503 });
 }
