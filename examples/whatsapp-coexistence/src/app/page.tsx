@@ -1,18 +1,16 @@
-import { generateVerifyToken } from "@chat-adapter/whatsapp-coexistence";
-
 function EnvStatus() {
   const mode = process.env.WHATSAPP_MODE ?? "single";
 
   const shared = [
     { key: "FACEBOOK_APP_ID", required: true },
     { key: "WHATSAPP_APP_SECRET", required: true },
+    { key: "WHATSAPP_VERIFY_TOKEN", required: true },
     { key: "WHATSAPP_MODE", required: false, note: `Current: "${mode}"` },
   ];
 
   const singleOnly = [
     { key: "WHATSAPP_ACCESS_TOKEN", required: mode === "single" },
     { key: "WHATSAPP_PHONE_NUMBER_ID", required: mode === "single" },
-    { key: "WHATSAPP_VERIFY_TOKEN", required: mode === "single" },
   ];
 
   const allVars = mode === "single" ? [...shared, ...singleOnly] : shared;
@@ -53,7 +51,7 @@ function EnvStatus() {
       {mode === "multi" && (
         <p style={{ marginTop: "1rem", padding: "12px", background: "#f0f7ff", borderRadius: "6px", fontSize: "14px" }}>
           In <strong>multi-number mode</strong>, phone-number-specific credentials
-          (access token, phone number ID, verify token) are stored in the state adapter
+          (access token, phone number ID) are stored in the state adapter
           via the credential store. Use the Embedded Signup flow at{" "}
           <code>/api/auth/callback</code> to register new numbers, or add them via the API.
         </p>
@@ -64,7 +62,6 @@ function EnvStatus() {
 
 export default function SetupPage() {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://your-app.vercel.app";
-  const suggestedToken = generateVerifyToken();
   const mode = process.env.WHATSAPP_MODE ?? "single";
 
   return (
@@ -108,26 +105,25 @@ export default function SetupPage() {
           </a>
         </li>
         <li>Set <code>FACEBOOK_APP_ID</code> and <code>WHATSAPP_APP_SECRET</code> from Settings &rarr; Basic</li>
+        <li>
+          Choose a verify token and set <code>WHATSAPP_VERIFY_TOKEN</code> — this is shared across all numbers
+        </li>
         {mode === "single" ? (
           <>
             <li>Get an access token (System User or Embedded Signup) and set <code>WHATSAPP_ACCESS_TOKEN</code></li>
             <li>Set <code>WHATSAPP_PHONE_NUMBER_ID</code> from WABA dashboard</li>
-            <li>
-              Generate a verify token:{" "}
-              <code style={{ background: "#f4f4f4", padding: "2px 6px", borderRadius: "3px" }}>{suggestedToken}</code>
-              {" "}and set <code>WHATSAPP_VERIFY_TOKEN</code>
-            </li>
           </>
         ) : (
           <li>
             Complete the Embedded Signup flow — the OAuth callback at{" "}
-            <code>/api/auth/callback</code> will store credentials automatically
+            <code>/api/auth/callback</code> will store per-number credentials automatically
           </li>
         )}
         <li>
           Configure webhooks in Meta App Dashboard:
           <ul>
             <li>Callback URL: <code>{appUrl}/api/webhooks/whatsapp</code></li>
+            <li>Verify token: the same value you set in <code>WHATSAPP_VERIFY_TOKEN</code></li>
             <li>Subscribe to: <strong>messages</strong>, <strong>smb_message_echoes</strong>, <strong>smb_app_state_sync</strong></li>
           </ul>
         </li>
@@ -161,8 +157,10 @@ export default function SetupPage() {
         ) : (
           <>
             <p>
-              <strong>Multi-number mode</strong>: Per-number credentials are stored in the state adapter
-              (<code>StateCredentialStore</code>). This works with any Chat SDK state backend:
+              <strong>Multi-number mode</strong>: Per-number credentials (access token, phone number ID)
+              are stored in the state adapter (<code>StateCredentialStore</code>).
+              Shared config (app secret, verify token) stays in env vars.
+              This works with any Chat SDK state backend:
             </p>
             <ul>
               <li><code>MemoryState</code> — development (not persisted across restarts)</li>
